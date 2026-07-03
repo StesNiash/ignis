@@ -25,8 +25,12 @@
   let hideCreateButtons = false;
   let saving = false;
   let error = "";
+  let lastRoleName = null;
 
-  $: if (role) {
+  function loadRole() {
+    if (!role) return;
+    if (lastRoleName === role.name) return;
+    lastRoleName = role.name;
     displayName = role.displayName || role.name;
     permissions = [...(role.permissions || [])];
     fileAccessType = role.fileAccess?.type || "";
@@ -39,6 +43,9 @@
     makeEditorsReadOnly = !!role.makeEditorsReadOnly;
     hideCreateButtons = !!role.hideCreateButtons;
   }
+
+  loadRole();
+  $: if (role) loadRole();
 
   function togglePermission(perm) {
     if (permissions.includes(perm)) {

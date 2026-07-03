@@ -12,6 +12,8 @@ const {
 const { writeCoalesced, getPending } = writeCoalescer;
 const bootstrapRoutes = require("./bootstrap");
 const { userHasVaultAccess } = require("../auth/store");
+const { hasFileAccess } = require("../auth/roles");
+const { getFileTags, invalidateCache } = require("../auth/tag-resolver");
 
 const router = express.Router();
 
@@ -21,6 +23,24 @@ function checkAccess(req, res, vaultId, level) {
 
   if (!userHasVaultAccess(user.username, user.role, vaultId, level)) {
     res.status(403).json({ error: "Access denied to this vault" });
+    return false;
+  }
+
+  return true;
+}
+
+function checkFileAccess(req, res, resolved) {
+  const user = req.user;
+  if (!user) return true;
+
+  const vaultRoot = req._vaultRoot;
+  const relative = vaultRoot ? path.relative(vaultRoot, resolved) : resolved;
+
+  const exists = fs.existsSync(resolved);
+  const tags = exists ? getFileTags(resolved) : [];
+
+  if (!hasFileAccess(user, relative, tags)) {
+    res.status(403).json({ error: "Access denied to this file" });
     return false;
   }
 
@@ -38,6 +58,7 @@ function getVaultRoot(req, res) {
   }
 
   req._vaultId = vaultId;
+  req._vaultRoot = vaultPath;
   return vaultPath;
 }
 
@@ -78,6 +99,7 @@ function guardWritePath(req, res, source) {
   if (!resolved) return null;
 
   if (!checkAccess(req, res, req._vaultId, "write")) return null;
+  if (!checkFileAccess(req, res, resolved)) return null;
 
   return resolved;
 }
@@ -87,6 +109,7 @@ function guardReadPath(req, res, source) {
   if (!resolved) return null;
 
   if (!checkAccess(req, res, req._vaultId, "read")) return null;
+  if (!checkFileAccess(req, res, resolved)) return null;
 
   return resolved;
 }
@@ -242,6 +265,7 @@ router.post("/writeFile", async (req, res) => {
 
     const result = await writeCoalesced(resolved, data, encoding);
 
+    invalidateCache(resolved);
     invalidateBootstrap(req);
     res.json({ ok: true, mtime: result.mtime, size: result.size });
   } catch (e) {
@@ -308,9 +332,14 @@ router.post("/rename", async (req, res) => {
     return res.status(403).json({ error: "Invalid path" });
   }
 
+  if (!checkFileAccess(req, res, oldResolved)) return;
+  if (!checkFileAccess(req, res, newResolved)) return;
+
   try {
     await fs.promises.rename(oldResolved, newResolved);
 
+    invalidateCache(oldResolved);
+    invalidateCache(newResolved);
     invalidateBootstrap(req);
     res.json({ ok: true });
   } catch (e) {
@@ -339,9 +368,13 @@ router.post("/copyFile", async (req, res) => {
     return res.status(403).json({ error: "Invalid path" });
   }
 
+  if (!checkFileAccess(req, res, srcResolved)) return;
+  if (!checkFileAccess(req, res, destResolved)) return;
+
   try {
     await fs.promises.copyFile(srcResolved, destResolved);
 
+    invalidateCache(destResolved);
     invalidateBootstrap(req);
     res.json({ ok: true });
   } catch (e) {
@@ -360,6 +393,7 @@ router.delete("/unlink", async (req, res) => {
   try {
     await fs.promises.unlink(resolved);
 
+    invalidateCache(resolved);
     invalidateBootstrap(req);
     res.json({ ok: true });
   } catch (e) {
@@ -403,6 +437,7 @@ router.delete("/rm", async (req, res) => {
       recursive: req.query.recursive === "true",
     });
 
+    invalidateCache(resolved);
     invalidateBootstrap(req);
     res.json({ ok: true });
   } catch (e) {

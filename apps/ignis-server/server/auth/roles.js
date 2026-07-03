@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const minimatch = require("minimatch");
+const { minimatch } = require("minimatch");
 const config = require("../config");
 
 const ROLES_FILE = path.join(config.dataRoot, "roles.json");
@@ -172,9 +172,12 @@ function canUserVaultAccess(user, vaultId, level) {
 
 /**
  * Check if a user has access to a specific file path.
- * Returns true if access is allowed (considering whitelist/blacklist rules).
+ * Returns true if access is allowed (considering whitelist/blacklist rules for paths and tags).
+ * @param {object} user - { username, role }
+ * @param {string} filePath - absolute or relative file path
+ * @param {string[]} [tags] - file's frontmatter tags ([] if file has no tags)
  */
-function hasFileAccess(user, filePath) {
+function hasFileAccess(user, filePath, tags) {
   if (!user || !filePath) return true;
   const role = getRoleDefinition(user.role);
   if (!role) return false;
@@ -185,24 +188,48 @@ function hasFileAccess(user, filePath) {
 
   const normalizedPath = filePath.replace(/\\/g, "/");
 
-  const matches = fa.paths.some((pattern) =>
-    minimatch(normalizedPath, pattern)
-  );
+  const hasPathRules = fa.paths.length > 0;
+  const hasTagRules = fa.tags.length > 0;
 
-  const excluded = fa.excludePaths.some((pattern) =>
-    minimatch(normalizedPath, pattern)
-  );
+  if (!hasPathRules && !hasTagRules) return true;
 
-  if (excluded) return fa.type === "whitelist" ? false : true;
+  let pathAllowed = true;
+  let tagAllowed = true;
 
-  if (fa.type === "whitelist") {
-    return matches;
+  if (hasPathRules) {
+    const matches = fa.paths.some((pattern) =>
+      minimatch(normalizedPath, pattern)
+    );
+    const excluded = fa.excludePaths.some((pattern) =>
+      minimatch(normalizedPath, pattern)
+    );
+
+    if (excluded) {
+      pathAllowed = fa.type === "blacklist";
+    } else if (fa.type === "whitelist") {
+      pathAllowed = matches;
+    } else {
+      pathAllowed = !matches;
+    }
   }
-  if (fa.type === "blacklist") {
-    return !matches;
+
+  if (hasTagRules && tags !== undefined) {
+    const tagSet = new Set((tags || []).map((t) => t.toLowerCase()));
+    const excludeSet = new Set((fa.excludeTags || []).map((t) => t.toLowerCase()));
+
+    const hasMatchingTag = fa.tags.some((t) => tagSet.has(t.toLowerCase()));
+    const hasExcludedTag = [...excludeSet].some((t) => tagSet.has(t));
+
+    if (hasExcludedTag) {
+      tagAllowed = fa.type === "blacklist";
+    } else if (fa.type === "whitelist") {
+      tagAllowed = hasMatchingTag;
+    } else {
+      tagAllowed = !hasMatchingTag;
+    }
   }
 
-  return true;
+  return pathAllowed && tagAllowed;
 }
 
 function getClientPermissions(user) {
