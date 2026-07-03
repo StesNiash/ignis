@@ -16,6 +16,7 @@ const {
 const { getVersion } = require("../version");
 const settings = require("../settings");
 const { sanitizeError } = require("@ignis/server-core");
+const { shouldHideInaccessible, hasFileAccessByPath } = require("../auth/roles");
 
 const router = express.Router();
 
@@ -209,6 +210,19 @@ async function warmUp() {
   }
 }
 
+function filterTree(tree, user) {
+  if (!user || !shouldHideInaccessible(user)) return tree;
+
+  const filtered = {};
+  for (const [rel, entry] of Object.entries(tree)) {
+    if (entry.type === "file" && !hasFileAccessByPath(user, rel)) {
+      continue;
+    }
+    filtered[rel] = entry;
+  }
+  return filtered;
+}
+
 router.get("/", async (req, res) => {
   const vaultId = req.query.vault || config.defaultVaultId;
 
@@ -221,6 +235,13 @@ router.get("/", async (req, res) => {
 
     if (!entry) {
       return res.status(404).json({ error: "Vault not found" });
+    }
+
+    const tree = filterTree(entry.response.tree, req.user);
+
+    if (Object.keys(tree).length !== Object.keys(entry.response.tree).length) {
+      const filteredResponse = { ...entry.response, tree };
+      return res.json(filteredResponse);
     }
 
     // In demo mode, route through res.json so the demo middleware can translate vault names per-session.
