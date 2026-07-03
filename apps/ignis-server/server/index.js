@@ -207,7 +207,8 @@ app.get(["/", "/index.html"], authRequired, (req, res) => {
 
   if (role === "reader") {
     extraHead += `<style>
-      body.ignis-readonly .nav-buttons-container .nav-action-button{display:none}
+      body.ignis-readonly .workspace-leaf-content[data-type="file-explorer"] .nav-buttons-container .nav-action-button:nth-child(1),
+      body.ignis-readonly .workspace-leaf-content[data-type="file-explorer"] .nav-buttons-container .nav-action-button:nth-child(2){display:none}
     </style>`;
   }
 

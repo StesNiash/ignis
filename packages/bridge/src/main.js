@@ -17,14 +17,13 @@ let currentUser = null;
 let readOnlyObserver = null;
 
 // Plugin IDs for internal plugins that create / modify content.
-// These are language-independent and stable across Obsidian versions.
+// Language-independent and stable across Obsidian versions.
 const DANGEROUS_PLUGIN_IDS = new Set([
   "daily-notes",
   "templates",
   "canvas",
   "note-composer",
   "audio-recorder",
-  "bases",
 ]);
 
 // English text for dangerous context-menu items (only place we still match text).
