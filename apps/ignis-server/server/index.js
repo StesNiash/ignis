@@ -27,6 +27,7 @@ const authRoutes = require("./routes/auth");
 const adminRoutes = require("./routes/admin");
 const {
   getClientPermissions,
+  hasFileAccessByPath,
 } = require("./auth/roles");
 writeCoalescer.configure({ writeCoalesceMs: settings.get("writeCoalesceMs") });
 const { flushAll } = writeCoalescer;
@@ -144,8 +145,13 @@ app.use("/vault-files", (req, res, next) => {
     return res.status(404).json({ error: "Vault not found" });
   }
 
+  const relPath = parts.slice(1).join("/");
+  if (req.user && !hasFileAccessByPath(req.user, relPath)) {
+    return res.status(403).json({ error: "Access denied to this file" });
+  }
+
   // Rewrite req.url to strip the vault ID prefix, then serve statically
-  req.url = "/" + parts.slice(1).join("/");
+  req.url = "/" + relPath;
   express.static(vaultPath)(req, res, next);
 });
 
