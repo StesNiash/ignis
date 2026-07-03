@@ -20,6 +20,7 @@ function proxy(name) {
 }
 
 export const showVaultManager = proxy("showVaultManager");
+export const showAdminDashboard = proxy("showAdminDashboard");
 export const showMessageDialog = proxy("showMessageDialog");
 export const showConfirmDialog = proxy("showConfirmDialog");
 export const showPromptDialog = proxy("showPromptDialog");

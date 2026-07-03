@@ -1,12 +1,31 @@
 import { vaultService } from "@ignis/services";
 import InsecureContextNotice from "./components/layout/InsecureContextNotice.svelte";
 
+let currentUser = null;
+
+async function fetchCurrentUser() {
+  try {
+    const res = await fetch("/api/auth/me");
+    if (res.ok) {
+      currentUser = await res.json();
+    }
+  } catch {}
+}
+
 function showVaultManager() {
   if (document.querySelector(".vault-manager-overlay")) return;
 
   new window.IgnisUI.VaultManager({
     target: document.body,
-    props: { vaultService },
+    props: { vaultService, currentUser },
+  });
+}
+
+function showAdminDashboard() {
+  if (document.querySelector(".modal-overlay")) return;
+
+  new window.IgnisUI.AdminDashboard({
+    target: document.body,
   });
 }
 
@@ -71,6 +90,7 @@ function showPromptDialog(
 if (typeof window !== "undefined" && window.__ignis_registerUI) {
   window.__ignis_registerUI({
     showVaultManager,
+    showAdminDashboard,
     showMessageDialog,
     showConfirmDialog,
     showPromptDialog,
@@ -80,6 +100,8 @@ if (typeof window !== "undefined" && window.__ignis_registerUI) {
     "[ignis] __ignis_registerUI not available; UI handlers not registered",
   );
 }
+
+fetchCurrentUser();
 
 // On a non-secure context the browser gates certain APIs causing certain features to break.
 // Show a notice about the degraded experience and how to fix it.

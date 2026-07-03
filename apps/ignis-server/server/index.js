@@ -21,6 +21,10 @@ const {
   getBundledPluginDirs,
 } = require("./plugin-system/manager");
 const pluginRoutes = require("./routes/plugins");
+const { authRequired, wsExtractToken } = require("./auth/middleware");
+const { verify: verifyToken } = require("./auth/token");
+const authRoutes = require("./routes/auth");
+const adminRoutes = require("./routes/admin");
 writeCoalescer.configure({ writeCoalesceMs: settings.get("writeCoalesceMs") });
 const { flushAll } = writeCoalescer;
 const { setupDemo, wireDemoWebSocket } = require("./demo");
@@ -84,6 +88,29 @@ const bootstrapRoutes = require("./routes/bootstrap");
 
 app.use("/assets", express.static(path.join(__dirname, "assets")));
 
+// Auth routes — not protected, available before authentication
+app.use("/api/auth", authRoutes);
+
+// Login page — standalone HTML, served without auth
+app.get("/login", (req, res) => {
+  res.sendFile(path.join(__dirname, "assets", "login.html"));
+});
+
+// Protected routes middleware
+const protectedPaths = [
+  "/api/fs",
+  "/api/vault",
+  "/api/proxy",
+  "/api/version",
+  "/api/settings",
+  "/api/plugins",
+  "/api/bootstrap",
+  "/api/admin",
+  "/vault-files",
+];
+
+app.use(protectedPaths, authRequired);
+
 // Demo mode: layers session/quota/allowlist middleware on top of the existing routes.
 // Must run BEFORE the routes are mounted. No-op when DEMO_MODE != true.
 setupDemo(app);
@@ -95,6 +122,7 @@ app.use("/api/version", versionRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/plugins", pluginRoutes);
 app.use("/api/bootstrap", bootstrapRoutes);
+app.use("/api/admin", adminRoutes);
 
 // Serve vault files for resource URLs (images, attachments, etc.)
 // Vault ID is the first path segment: /vault-files/<vault-id>/path/to/file
@@ -167,7 +195,7 @@ function buildIndexHtml() {
   return cachedHtml;
 }
 
-app.get(["/", "/index.html"], (req, res) => {
+app.get(["/", "/index.html"], authRequired, (req, res) => {
   res.set("Content-Type", "text/html; charset=utf-8");
   res.set("Cache-Control", "no-cache");
   res.send(buildIndexHtml());
@@ -220,6 +248,13 @@ const server = app.listen(config.port, async () => {
 const wss = setupWebSocket(server, {
   getVaultPath: config.getVaultPath,
   originAllowlist: settings.get("wsOrigins"),
+  authenticate: (req) => {
+    const token = wsExtractToken(req);
+    if (!token) return null;
+    const payload = verifyToken(token);
+    if (!payload) return null;
+    return payload;
+  },
 });
 wireDemoWebSocket(server);
 

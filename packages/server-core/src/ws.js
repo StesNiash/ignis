@@ -24,7 +24,7 @@ function heartbeatSweep(clients) {
 }
 
 function setupWebSocket(server, opts = {}) {
-  const { getVaultPath, originAllowlist } = opts;
+  const { getVaultPath, originAllowlist, authenticate } = opts;
 
   if (typeof getVaultPath !== "function") {
     throw new Error("setupWebSocket: opts.getVaultPath is required");
@@ -129,6 +129,15 @@ function setupWebSocket(server, opts = {}) {
         ws.close(4003, "Origin not allowed");
         return;
       }
+    }
+
+    if (typeof authenticate === "function") {
+      const user = authenticate(req);
+      if (!user) {
+        ws.close(4001, "Authentication required");
+        return;
+      }
+      ws._user = user;
     }
 
     const params = new url.URL(req.url, "http://localhost").searchParams;

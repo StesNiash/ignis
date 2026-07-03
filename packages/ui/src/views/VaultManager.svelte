@@ -8,6 +8,7 @@
     PenLine,
     Trash2,
     Check,
+    Settings,
   } from "lucide-svelte";
   import Modal from "../components/layout/Modal.svelte";
   import PromptDialog from "../components/layout/PromptDialog.svelte";
@@ -17,10 +18,13 @@
   import Button from "../components/input/Button.svelte";
   import ListItem from "../components/display/ListItem.svelte";
   import PopoverMenu from "../components/menu/PopoverMenu.svelte";
+  import AdminDashboard from "./admin/AdminDashboard.svelte";
 
   export let vaultService;
+  export let currentUser = null;
 
   let vaults = [];
+  let isAdmin = false;
   let searchQuery = "";
   let openMenuId = null;
   let modalRef;
@@ -186,7 +190,13 @@
     }
   }
 
+  function showAdmin() {
+    modalRef.dismiss();
+    new AdminDashboard({ target: document.body });
+  }
+
   onMount(() => {
+    isAdmin = currentUser?.role === "admin";
     refreshVaults();
     fetchVersion();
   });
@@ -261,6 +271,14 @@
     <div class="footer-left">
       {#if version}
         <span class="version-info">Ignis v{version}</span>
+      {/if}
+      {#if isAdmin}
+        <Button variant="ghost" on:click={showAdmin}>
+          <svelte:fragment slot="icon">
+            <Settings size="1rem" />
+          </svelte:fragment>
+          Admin
+        </Button>
       {/if}
     </div>
     <div class="footer-right">
