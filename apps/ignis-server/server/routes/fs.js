@@ -12,7 +12,7 @@ const {
 const { writeCoalesced, getPending } = writeCoalescer;
 const bootstrapRoutes = require("./bootstrap");
 const { userHasVaultAccess } = require("../auth/store");
-const { hasFileAccess } = require("../auth/roles");
+const { hasFileAccess, shouldHideInaccessible, hasFileAccessByPath } = require("../auth/roles");
 const { getFileTags, invalidateCache } = require("../auth/tag-resolver");
 
 const router = express.Router();
@@ -179,8 +179,21 @@ router.get("/readdir", async (req, res) => {
       withFileTypes: true,
     });
 
+    const hide = shouldHideInaccessible(req.user);
+    const dirRel = req.query.path || "";
+
+    let filtered = entries;
+
+    if (hide) {
+      filtered = entries.filter((e) => {
+        if (e.isDirectory()) return true;
+        const rel = dirRel ? dirRel + "/" + e.name : e.name;
+        return hasFileAccessByPath(req.user, rel);
+      });
+    }
+
     res.json(
-      entries.map((e) => ({
+      filtered.map((e) => ({
         name: e.name,
         type: e.isDirectory() ? "directory" : "file",
       })),
@@ -517,6 +530,14 @@ router.post("/batch-read", async (req, res) => {
         return;
       }
 
+      if (req.user) {
+        const exists = fs.existsSync(resolved);
+        const tags = exists ? getFileTags(resolved) : [];
+        if (!hasFileAccess(req.user, relPath, tags)) {
+          return;
+        }
+      }
+
       try {
         const buffered = getPending(resolved);
 
@@ -564,6 +585,7 @@ router.get("/tree", async (req, res) => {
 
   try {
     const tree = {};
+    const hide = shouldHideInaccessible(req.user);
 
     async function walk(dir, prefix) {
       const entries = await fs.promises.readdir(dir, {
@@ -579,6 +601,8 @@ router.get("/tree", async (req, res) => {
 
           await walk(full, rel);
         } else {
+          if (hide && !hasFileAccessByPath(req.user, rel)) continue;
+
           const stat = await fs.promises.stat(full);
 
           tree[rel] = {

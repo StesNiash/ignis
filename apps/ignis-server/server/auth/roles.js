@@ -136,12 +136,16 @@ function validateFileAccess(fa) {
   const types = ["blacklist", "whitelist"];
   if (!types.includes(fa.type)) return null;
 
+  const hasRules = (Array.isArray(fa.paths) && fa.paths.length > 0)
+    || (Array.isArray(fa.tags) && fa.tags.length > 0);
+
   return {
     type: fa.type,
     paths: Array.isArray(fa.paths) ? fa.paths : [],
     tags: Array.isArray(fa.tags) ? fa.tags : [],
     excludePaths: Array.isArray(fa.excludePaths) ? fa.excludePaths : [],
     excludeTags: Array.isArray(fa.excludeTags) ? fa.excludeTags : [],
+    hideInaccessible: fa.hideInaccessible !== undefined ? !!fa.hideInaccessible : hasRules,
   };
 }
 
@@ -232,6 +236,34 @@ function hasFileAccess(user, filePath, tags) {
   return pathAllowed && tagAllowed;
 }
 
+function shouldHideInaccessible(user) {
+  if (!user) return false;
+  const role = getRoleDefinition(user.role);
+  if (!role) return false;
+  if (role.permissions.includes("*")) return false;
+  return !!(role.fileAccess && role.fileAccess.hideInaccessible);
+}
+
+function hasFileAccessByPath(user, relativePath) {
+  if (!user || !relativePath) return true;
+  const role = getRoleDefinition(user.role);
+  if (!role) return false;
+  if (role.permissions.includes("*")) return true;
+
+  const fa = role.fileAccess;
+  if (!fa) return true;
+  if (fa.paths.length === 0) return true;
+
+  const normalizedPath = relativePath.replace(/\\/g, "/");
+
+  const matches = fa.paths.some((pattern) => minimatch(normalizedPath, pattern));
+  const excluded = fa.excludePaths.some((pattern) => minimatch(normalizedPath, pattern));
+
+  if (excluded) return fa.type === "blacklist";
+  if (fa.type === "whitelist") return matches;
+  return !matches;
+}
+
 function getClientPermissions(user) {
   if (!user) return {};
   const role = getRoleDefinition(user.role);
@@ -276,6 +308,8 @@ module.exports = {
   hasPermission,
   canUserVaultAccess,
   hasFileAccess,
+  shouldHideInaccessible,
+  hasFileAccessByPath,
   getClientPermissions,
   getAllRoles,
   validatePermissions,

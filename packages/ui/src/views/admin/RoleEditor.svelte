@@ -23,6 +23,7 @@
   let hideMenuItems = "";
   let makeEditorsReadOnly = false;
   let hideCreateButtons = false;
+  let hideInaccessible = false;
   let saving = false;
   let error = "";
   let lastRoleName = null;
@@ -42,6 +43,9 @@
     hideMenuItems = (role.hideMenuItems || []).join(", ");
     makeEditorsReadOnly = !!role.makeEditorsReadOnly;
     hideCreateButtons = !!role.hideCreateButtons;
+    hideInaccessible = role.fileAccess?.hideInaccessible !== undefined
+      ? !!role.fileAccess.hideInaccessible
+      : !!(role.fileAccess?.type && ((role.fileAccess?.paths?.length > 0) || (role.fileAccess?.tags?.length > 0)));
   }
 
   loadRole();
@@ -79,6 +83,7 @@
         tags: fileAccessTags.split(",").map((s) => s.trim()).filter(Boolean),
         excludePaths: fileAccessExcludePaths.split(",").map((s) => s.trim()).filter(Boolean),
         excludeTags: fileAccessExcludeTags.split(",").map((s) => s.trim()).filter(Boolean),
+        hideInaccessible,
       };
     } else {
       body.fileAccess = null;
@@ -235,6 +240,10 @@
         <label>
           Exclude tags
           <input type="text" bind:value={fileAccessExcludeTags} placeholder="secret" />
+        </label>
+        <label class="perm-check">
+          <input type="checkbox" bind:checked={hideInaccessible} />
+          Hide inaccessible files in file explorer (recommended)
         </label>
       {/if}
     </div>
