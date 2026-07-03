@@ -11,8 +11,21 @@ const {
 } = require("@ignis/server-core");
 const { writeCoalesced, getPending } = writeCoalescer;
 const bootstrapRoutes = require("./bootstrap");
+const { userHasVaultAccess } = require("../auth/store");
 
 const router = express.Router();
+
+function checkAccess(req, res, vaultId, level) {
+  const user = req.user;
+  if (!user) return true;
+
+  if (!userHasVaultAccess(user.username, user.role, vaultId, level)) {
+    res.status(403).json({ error: "Access denied to this vault" });
+    return false;
+  }
+
+  return true;
+}
 
 // Resolve the vault root for a request. Reads vault ID from query or body.
 function getVaultRoot(req, res) {
@@ -60,9 +73,27 @@ function guardPath(req, res, source = "query") {
   return resolved;
 }
 
+function guardWritePath(req, res, source) {
+  const resolved = guardPath(req, res, source);
+  if (!resolved) return null;
+
+  if (!checkAccess(req, res, req._vaultId, "write")) return null;
+
+  return resolved;
+}
+
+function guardReadPath(req, res, source) {
+  const resolved = guardPath(req, res, source);
+  if (!resolved) return null;
+
+  if (!checkAccess(req, res, req._vaultId, "read")) return null;
+
+  return resolved;
+}
+
 // GET /api/fs/stat?path=...
 router.get("/stat", async (req, res) => {
-  const resolved = guardPath(req, res);
+  const resolved = guardReadPath(req, res);
 
   if (!resolved) {
     return;
@@ -105,7 +136,7 @@ router.get("/stat", async (req, res) => {
 
 // GET /api/fs/readdir?path=...
 router.get("/readdir", async (req, res) => {
-  const resolved = guardPath(req, res);
+  const resolved = guardReadPath(req, res);
 
   if (!resolved) {
     return;
@@ -140,7 +171,7 @@ router.get("/readdir", async (req, res) => {
 
 // GET /api/fs/readFile?path=...&encoding=...
 router.get("/readFile", async (req, res) => {
-  const resolved = guardPath(req, res);
+  const resolved = guardReadPath(req, res);
 
   if (!resolved) {
     return;
@@ -191,7 +222,7 @@ router.get("/readFile", async (req, res) => {
 
 // POST /api/fs/writeFile { path, content, encoding?, vault? }
 router.post("/writeFile", async (req, res) => {
-  const resolved = guardPath(req, res, "body");
+  const resolved = guardWritePath(req, res, "body");
 
   if (!resolved) {
     return;
@@ -220,7 +251,7 @@ router.post("/writeFile", async (req, res) => {
 
 // POST /api/fs/appendFile { path, content, vault? }
 router.post("/appendFile", async (req, res) => {
-  const resolved = guardPath(req, res, "body");
+  const resolved = guardWritePath(req, res, "body");
 
   if (!resolved) {
     return;
@@ -238,7 +269,7 @@ router.post("/appendFile", async (req, res) => {
 
 // POST /api/fs/mkdir { path, recursive?, vault? }
 router.post("/mkdir", async (req, res) => {
-  const resolved = guardPath(req, res, "body");
+  const resolved = guardWritePath(req, res, "body");
 
   if (!resolved) {
     return;
@@ -263,6 +294,8 @@ router.post("/rename", async (req, res) => {
   if (!vaultRoot) {
     return;
   }
+
+  if (!checkAccess(req, res, req._vaultId, "write")) return;
 
   if (!req.body?.oldPath || !req.body?.newPath) {
     return res.status(400).json({ error: "Missing oldPath or newPath" });
@@ -293,6 +326,8 @@ router.post("/copyFile", async (req, res) => {
     return;
   }
 
+  if (!checkAccess(req, res, req._vaultId, "write")) return;
+
   if (!req.body?.src || !req.body?.dest) {
     return res.status(400).json({ error: "Missing src or dest" });
   }
@@ -316,7 +351,7 @@ router.post("/copyFile", async (req, res) => {
 
 // DELETE /api/fs/unlink?path=...
 router.delete("/unlink", async (req, res) => {
-  const resolved = guardPath(req, res);
+  const resolved = guardWritePath(req, res);
 
   if (!resolved) {
     return;
@@ -339,7 +374,7 @@ router.delete("/unlink", async (req, res) => {
 
 // DELETE /api/fs/rmdir?path=...
 router.delete("/rmdir", async (req, res) => {
-  const resolved = guardPath(req, res);
+  const resolved = guardWritePath(req, res);
 
   if (!resolved) {
     return;
@@ -357,7 +392,7 @@ router.delete("/rmdir", async (req, res) => {
 
 // DELETE /api/fs/rm?path=...&recursive=true
 router.delete("/rm", async (req, res) => {
-  const resolved = guardPath(req, res);
+  const resolved = guardWritePath(req, res);
 
   if (!resolved) {
     return;
@@ -376,7 +411,7 @@ router.delete("/rm", async (req, res) => {
 });
 
 router.get("/access", async (req, res) => {
-  const resolved = guardPath(req, res);
+  const resolved = guardReadPath(req, res);
 
   if (!resolved) {
     return;
@@ -395,7 +430,7 @@ router.get("/access", async (req, res) => {
 
 // POST /api/fs/utimes { path, atime, mtime, vault? }
 router.post("/utimes", async (req, res) => {
-  const resolved = guardPath(req, res, "body");
+  const resolved = guardWritePath(req, res, "body");
 
   if (!resolved) {
     return;
@@ -423,6 +458,8 @@ router.post("/batch-read", async (req, res) => {
   if (!vaultRoot) {
     return;
   }
+
+  if (!checkAccess(req, res, req._vaultId, "read")) return;
 
   const paths = Array.isArray(req.body?.paths) ? req.body.paths : [];
 
@@ -480,6 +517,8 @@ router.get("/tree", async (req, res) => {
     return;
   }
 
+  if (!checkAccess(req, res, req._vaultId, "read")) return;
+
   const rootPath = req.query.path
     ? resolveVaultPath(vaultRoot, req.query.path)
     : vaultRoot;
@@ -527,7 +566,7 @@ router.get("/tree", async (req, res) => {
 
 // GET /api/fs/download?path=...&vault=...
 router.get("/download", async (req, res) => {
-  const resolved = guardPath(req, res);
+  const resolved = guardReadPath(req, res);
 
   if (!resolved) {
     return;
@@ -557,7 +596,7 @@ router.get("/download", async (req, res) => {
 
 // GET /api/fs/download-zip?path=...&vault=...
 router.get("/download-zip", async (req, res) => {
-  const resolved = guardPath(req, res);
+  const resolved = guardReadPath(req, res);
 
   if (!resolved) {
     return;

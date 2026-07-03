@@ -4,6 +4,7 @@ const config = require("../config");
 const path = require("path");
 const bootstrapRoutes = require("./bootstrap");
 const { sanitizeError } = require("@ignis/server-core");
+const { requireRole } = require("../auth/middleware");
 
 const router = express.Router();
 
@@ -58,7 +59,7 @@ router.get("/info", async (req, res) => {
 });
 
 // POST /api/vault/create { name } - create a new vault in VAULT_ROOT
-router.post("/create", async (req, res) => {
+router.post("/create", requireRole("admin"), async (req, res) => {
   const name = req.body?.name;
 
   if (!isValidVaultName(name)) {
@@ -87,7 +88,7 @@ router.post("/create", async (req, res) => {
 });
 
 // POST /api/vault/rename { vault, name } - rename a vault
-router.post("/rename", async (req, res) => {
+router.post("/rename", requireRole("admin"), async (req, res) => {
   const vaultId = req.body?.vault;
   const newName = req.body?.name;
 
@@ -123,7 +124,7 @@ router.post("/rename", async (req, res) => {
 });
 
 // DELETE /api/vault/remove?vault=<id> - remove a vault from disk
-router.delete("/remove", async (req, res) => {
+router.delete("/remove", requireRole("admin"), async (req, res) => {
   const vaultId = req.query.vault;
   const vaultPath = config.getVaultPath(vaultId);
 
