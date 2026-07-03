@@ -16,14 +16,23 @@ import { startDemoGuards, stopDemoGuards } from "./demo-guards.js";
 let currentUser = null;
 let readOnlyObserver = null;
 
-// Plugin IDs for internal plugins that create / modify content.
-// Language-independent and stable across Obsidian versions.
-const DANGEROUS_PLUGIN_IDS = new Set([
-  "daily-notes",
-  "templates",
-  "canvas",
-  "note-composer",
-  "audio-recorder",
+// Plugin IDs whose ribbon items are safe for readers (read-only).
+const SAFE_PLUGIN_IDS = new Set([
+  "command-palette",
+  "switcher",
+  "graph",
+  "search",
+  "backlink",
+  "outline",
+  "file-explorer",
+  "bookmarks",
+  "tag-pane",
+  "starred",
+  "random-note",
+  "sync",
+  "publish",
+  "markdown-importer",
+  "ignis-bridge",
 ]);
 
 // English text for dangerous context-menu items (only place we still match text).
@@ -50,18 +59,6 @@ function makeAllEditorsReadOnly() {
   });
 }
 
-function hideDangerousRibbonItems() {
-  const app = window.app;
-  if (!app?.workspace?.leftRibbon?.items) return;
-
-  for (const item of app.workspace.leftRibbon.items) {
-    const pluginId = item.id?.split(":")[0];
-    if (DANGEROUS_PLUGIN_IDS.has(pluginId) && item.buttonEl) {
-      item.buttonEl.style.display = "none";
-    }
-  }
-}
-
 function hideDangerousMenuItems() {
   document.querySelectorAll(".menu-item").forEach((el) => {
     const text = (el.getAttribute("aria-label") || el.textContent || "").trim();
@@ -73,11 +70,11 @@ function hideDangerousMenuItems() {
 
 function enforceReadOnly() {
   makeAllEditorsReadOnly();
-  hideDangerousRibbonItems();
+  applyRibbonConfig();
 
   readOnlyObserver = new MutationObserver(() => {
     makeAllEditorsReadOnly();
-    hideDangerousRibbonItems();
+    applyRibbonConfig();
     hideDangerousMenuItems();
   });
 
@@ -85,6 +82,26 @@ function enforceReadOnly() {
     childList: true,
     subtree: true,
   });
+}
+
+function applyRibbonConfig() {
+  const ribbon = window.app?.workspace?.leftRibbon;
+  if (!ribbon?.items) return;
+
+  let changed = false;
+
+  for (const item of ribbon.items) {
+    const pluginId = item.id?.split(":")[0];
+    const shouldShow = SAFE_PLUGIN_IDS.has(pluginId);
+    if (item.hidden === shouldShow) {
+      item.hidden = !shouldShow;
+      changed = true;
+    }
+  }
+
+  if (changed && typeof ribbon.onChange === "function") {
+    ribbon.onChange(false);
+  }
 }
 
 function stopEnforceReadOnly() {
