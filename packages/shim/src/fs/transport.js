@@ -23,6 +23,10 @@ const KEEPALIVE_MAX_BYTES = 64 * 1024;
 
 // keepalive lets a request finish after the page starts unloading.
 // Its body is capped at 64KB across a shared pool, so opt in only under that limit.
+function isReadOnly() {
+  return window.__ignisUserRole === "reader";
+}
+
 function withinKeepaliveCap(body) {
   if (!body) {
     return true;
@@ -141,6 +145,7 @@ export const transport = {
   },
 
   async writeFile(path, content, encoding) {
+    if (isReadOnly()) return { ok: true, mtime: Date.now(), size: 0 };
     const isText = typeof content === "string";
     return requestJson("POST", "/writeFile", {
       path: normPath(path),
@@ -151,6 +156,7 @@ export const transport = {
   },
 
   async appendFile(path, content) {
+    if (isReadOnly()) return { ok: true };
     return requestJson("POST", "/appendFile", {
       path: normPath(path),
       content,
@@ -158,10 +164,12 @@ export const transport = {
   },
 
   async mkdir(path, recursive) {
+    if (isReadOnly()) return { ok: true };
     return requestJson("POST", "/mkdir", { path: normPath(path), recursive });
   },
 
   async rename(oldPath, newPath) {
+    if (isReadOnly()) return { ok: true };
     return requestJson("POST", "/rename", {
       oldPath: normPath(oldPath),
       newPath: normPath(newPath),
@@ -169,6 +177,7 @@ export const transport = {
   },
 
   async copyFile(src, dest) {
+    if (isReadOnly()) return { ok: true };
     return requestJson("POST", "/copyFile", {
       src: normPath(src),
       dest: normPath(dest),
@@ -176,14 +185,17 @@ export const transport = {
   },
 
   async unlink(path) {
+    if (isReadOnly()) return { ok: true };
     return requestJson("DELETE", "/unlink", { path: normPath(path) });
   },
 
   async rmdir(path) {
+    if (isReadOnly()) return { ok: true };
     return requestJson("DELETE", "/rmdir", { path: normPath(path) });
   },
 
   async rm(path, recursive) {
+    if (isReadOnly()) return { ok: true };
     return requestJson("DELETE", "/rm", {
       path: normPath(path),
       recursive: recursive ? "true" : "false",
@@ -195,6 +207,7 @@ export const transport = {
   },
 
   async utimes(path, atime, mtime) {
+    if (isReadOnly()) return { ok: true };
     return requestJson("POST", "/utimes", {
       path: normPath(path),
       atime,
@@ -223,6 +236,7 @@ export const transport = {
   },
 
   writeFileSync(path, content, encoding) {
+    if (isReadOnly()) return;
     const isText = typeof content === "string";
     requestSync("POST", "/writeFile", {
       path: normPath(path),
