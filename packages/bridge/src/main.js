@@ -1,4 +1,4 @@
-import { Plugin, TFile, TFolder } from "obsidian";
+import { Plugin, TFile, TFolder, Menu } from "obsidian";
 import {
   showFilePicker,
   addFileMenuItems,
@@ -13,6 +13,29 @@ import { initStatusBar } from "./status-bar.js";
 import { WorkspacePickerModal } from "./workspace-picker.js";
 import { startDemoGuards, stopDemoGuards } from "./demo-guards.js";
 
+let currentUser = null;
+
+async function fetchCurrentUser() {
+  try {
+    const res = await fetch("/api/auth/me");
+    if (res.ok) {
+      currentUser = await res.json();
+    }
+  } catch {}
+}
+
+function showAdminDashboard() {
+  if (window.IgnisUI?.AdminDashboard) {
+    new window.IgnisUI.AdminDashboard({ target: document.body });
+  }
+}
+
+async function logout() {
+  await fetch("/api/auth/logout", { method: "POST" });
+  document.cookie = "token=;path=/;max-age=0";
+  window.location.href = "/login";
+}
+
 class IgnisBridgePlugin extends Plugin {
   async onload() {
     if (!window.__ignis) {
@@ -26,6 +49,7 @@ class IgnisBridgePlugin extends Plugin {
     patchSettingsModal(this);
     startDemoGuards();
     this._statusBarInterval = initStatusBar(this);
+    await fetchCurrentUser();
 
     this.addRibbonIcon("upload", "Upload file", () => {
       showFilePicker(this.app);
@@ -48,6 +72,49 @@ class IgnisBridgePlugin extends Plugin {
         }
       }),
     );
+
+    // Profile ribbon icon with dropdown menu
+    if (currentUser) {
+      this.addRibbonIcon("user", `Signed in as ${currentUser.username}`, (evt) => {
+        const menu = new Menu();
+
+        menu.addItem((item) =>
+          item
+            .setTitle(`User: ${currentUser.username}`)
+            .setIcon("user")
+            .setDisabled(true),
+        );
+
+        menu.addItem((item) =>
+          item
+            .setTitle(`Role: ${currentUser.role}`)
+            .setIcon("shield")
+            .setDisabled(true),
+        );
+
+        menu.addSeparator();
+
+        if (currentUser.role === "admin") {
+          menu.addItem((item) =>
+            item
+              .setTitle("Admin Dashboard")
+              .setIcon("settings")
+              .onClick(() => showAdminDashboard()),
+          );
+
+          menu.addSeparator();
+        }
+
+        menu.addItem((item) =>
+          item
+            .setTitle("Logout")
+            .setIcon("log-out")
+            .onClick(() => logout()),
+        );
+
+        menu.showAtMouseEvent(evt);
+      });
+    }
   }
 
   onunload() {
