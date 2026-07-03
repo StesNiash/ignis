@@ -17,6 +17,10 @@ import { installIgnisApi } from "./ignis-api.js";
 window.__ignis = { version: __IGNIS_VERSION__, build: __IGNIS_BUILD__ };
 window.__ignis_registerUI = registerUI;
 
+if (window.__ignisUserRole === "reader") {
+  document.body.classList.add("ignis-readonly");
+}
+
 installIgnisApi(wsClient);
 
 const BRIDGE_MANIFEST = {

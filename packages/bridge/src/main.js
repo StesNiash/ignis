@@ -15,7 +15,25 @@ import { startDemoGuards, stopDemoGuards } from "./demo-guards.js";
 
 let currentUser = null;
 let readOnlyObserver = null;
-let readOnlyStyle = null;
+
+// Plugin IDs for internal plugins that create / modify content.
+// These are language-independent and stable across Obsidian versions.
+const DANGEROUS_PLUGIN_IDS = new Set([
+  "daily-notes",
+  "templates",
+  "canvas",
+  "note-composer",
+  "audio-recorder",
+  "bases",
+]);
+
+// English text for dangerous context-menu items (only place we still match text).
+// We match against exact Obsidian internal labels – numbers are locale file line refs.
+const HIDE_MENU_TEXTS_EN = new Set([
+  "Delete",
+  "Rename",
+  "Make a copy",
+]);
 
 async function fetchCurrentUser() {
   try {
@@ -33,73 +51,35 @@ function makeAllEditorsReadOnly() {
   });
 }
 
-function injectReadOnlyStyles() {
-  if (readOnlyStyle) return;
-  readOnlyStyle = document.createElement("style");
-  readOnlyStyle.textContent = `
-    body.ignis-readonly .nav-header .nav-action-button[aria-label="New note"],
-    body.ignis-readonly .nav-header .nav-action-button[aria-label="New folder"],
-    body.ignis-readonly .nav-header .nav-action-button[aria-label="Sort"] {
-      display: none !important;
-    }
-  `;
-  document.head.appendChild(readOnlyStyle);
-}
+function hideDangerousRibbonItems() {
+  const app = window.app;
+  if (!app?.workspace?.leftRibbon?.items) return;
 
-function removeReadOnlyStyles() {
-  if (readOnlyStyle) {
-    readOnlyStyle.remove();
-    readOnlyStyle = null;
+  for (const item of app.workspace.leftRibbon.items) {
+    const pluginId = item.id?.split(":")[0];
+    if (DANGEROUS_PLUGIN_IDS.has(pluginId) && item.buttonEl) {
+      item.buttonEl.style.display = "none";
+    }
   }
 }
 
-function hideCreateActions() {
-  // Hide ribbon actions that create content
-  const createLabels = /create|new|insert|template|canvas|database|note|folder|drawing/i;
-  document.querySelectorAll(".side-dock-ribbon-action").forEach((el) => {
-    const label = el.getAttribute("aria-label") || "";
-    if (createLabels.test(label)) {
-      el.style.display = "none";
-    }
-  });
-
-  // Hide file explorer create buttons
-  document.querySelectorAll('.nav-header .nav-action-button').forEach((el) => {
-    const label = el.getAttribute("aria-label") || "";
-    if (/new note|new folder/i.test(label)) {
-      el.style.display = "none";
-    }
-  });
-
-  // Hide dangerous context menu items
-  const hideMenuLabels = /delete|rename|move|make a copy|reveal/i;
+function hideDangerousMenuItems() {
   document.querySelectorAll(".menu-item").forEach((el) => {
-    const title = el.getAttribute("aria-label") || el.textContent || "";
-    if (hideMenuLabels.test(title)) {
+    const text = (el.getAttribute("aria-label") || el.textContent || "").trim();
+    if (HIDE_MENU_TEXTS_EN.has(text)) {
       el.style.display = "none";
     }
   });
 }
 
 function enforceReadOnly() {
-  document.body.classList.add("ignis-readonly");
-  injectReadOnlyStyles();
-
-  // Run immediately and retry as Obsidian renders progressively
-  function sweep() {
-    makeAllEditorsReadOnly();
-    hideCreateActions();
-  }
-
-  sweep();
-  setTimeout(sweep, 100);
-  setTimeout(sweep, 500);
-  setTimeout(sweep, 1500);
-  setTimeout(sweep, 3000);
+  makeAllEditorsReadOnly();
+  hideDangerousRibbonItems();
 
   readOnlyObserver = new MutationObserver(() => {
     makeAllEditorsReadOnly();
-    hideCreateActions();
+    hideDangerousRibbonItems();
+    hideDangerousMenuItems();
   });
 
   readOnlyObserver.observe(document.body, {
@@ -113,8 +93,6 @@ function stopEnforceReadOnly() {
     readOnlyObserver.disconnect();
     readOnlyObserver = null;
   }
-  removeReadOnlyStyles();
-  document.body.classList.remove("ignis-readonly");
   document.querySelectorAll(".cm-editor .cm-content").forEach((el) => {
     el.setAttribute("contenteditable", "true");
   });
@@ -175,7 +153,6 @@ class IgnisBridgePlugin extends Plugin {
       }),
     );
 
-    // Profile ribbon icon with dropdown menu
     if (currentUser) {
       this.addRibbonIcon("user", `Signed in as ${currentUser.username}`, (evt) => {
         const menu = new Menu();

@@ -198,7 +198,22 @@ function buildIndexHtml() {
 app.get(["/", "/index.html"], authRequired, (req, res) => {
   res.set("Content-Type", "text/html; charset=utf-8");
   res.set("Cache-Control", "no-cache");
-  res.send(buildIndexHtml());
+  let html = buildIndexHtml();
+
+  const role = req.user?.role || "";
+  const roleScript = `<script>window.__ignisUserRole = "${role}";</script>`;
+
+  let extraHead = roleScript;
+
+  if (role === "reader") {
+    extraHead += `<style>
+      body.ignis-readonly .nav-buttons-container .nav-action-button{display:none}
+    </style>`;
+  }
+
+  html = html.replace("</head>", extraHead + "</head>");
+
+  res.send(html);
 });
 
 app.get("/favicon.png", (req, res) => {
