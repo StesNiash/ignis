@@ -4,6 +4,7 @@
   import Button from "../../components/input/Button.svelte";
 
   export let users = [];
+  export let roles = [];
   export let refresh = () => {};
 
   let showCreate = false;
@@ -16,6 +17,10 @@
   let editRole = "";
   let editPassword = "";
   let editError = "";
+
+  $: roleOptions = roles.length > 0
+    ? roles.map((r) => r.name)
+    : ["admin", "editor", "reader"];
 
   async function handleCreate() {
     createError = "";
@@ -41,7 +46,7 @@
       showCreate = false;
       createUsername = "";
       createPassword = "";
-      createRole = "reader";
+      createRole = roleOptions[0] || "reader";
       refresh();
     } catch (e) {
       createError = e.message;
@@ -101,8 +106,8 @@
   }
 
   function roleBadge(role) {
-    const map = { admin: "Admin", editor: "Editor", reader: "Reader" };
-    return map[role] || role;
+    const r = roles.find((rr) => rr.name === role);
+    return r?.displayName || role;
   }
 </script>
 
@@ -120,9 +125,9 @@
       <input type="text" placeholder="Username" bind:value={createUsername} />
       <input type="password" placeholder="Password" bind:value={createPassword} />
       <select bind:value={createRole}>
-        <option value="admin">Admin</option>
-        <option value="editor">Editor</option>
-        <option value="reader">Reader</option>
+        {#each roleOptions as ro}
+          <option value={ro}>{ro}</option>
+        {/each}
       </select>
       <div class="form-actions">
         <Button variant="ghost" size="small" on:click={() => { showCreate = false; createError = ""; }}>
@@ -152,9 +157,9 @@
           <span class="col-user">{user.username}</span>
           <span class="col-role">
             <select bind:value={editRole}>
-              <option value="admin">Admin</option>
-              <option value="editor">Editor</option>
-              <option value="reader">Reader</option>
+              {#each roleOptions as ro}
+                <option value={ro}>{ro}</option>
+              {/each}
             </select>
           </span>
           <span class="col-password">

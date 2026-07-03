@@ -1,0 +1,256 @@
+const fs = require("fs");
+const path = require("path");
+const minimatch = require("minimatch");
+const config = require("../config");
+
+const ROLES_FILE = path.join(config.dataRoot, "roles.json");
+
+const ALL_PERMISSIONS = [
+  "file:read",
+  "file:write",
+  "file:create",
+  "file:delete",
+  "file:rename",
+  "vault:read",
+  "vault:create",
+  "vault:delete",
+  "admin:*",
+];
+
+const BUILTIN_ROLES = {
+  admin: {
+    displayName: "Admin",
+    builtin: true,
+    permissions: ["*"],
+    fileAccess: null,
+  },
+  editor: {
+    displayName: "Editor",
+    builtin: true,
+    permissions: [
+      "file:read",
+      "file:write",
+      "file:create",
+      "file:delete",
+      "file:rename",
+      "vault:read",
+    ],
+    fileAccess: null,
+  },
+  reader: {
+    displayName: "Reader",
+    builtin: true,
+    permissions: ["file:read", "vault:read"],
+    fileAccess: null,
+    ribbonHiddenPluginIds: [
+      "daily-notes",
+      "templates",
+      "canvas",
+      "note-composer",
+      "audio-recorder",
+      "bases",
+    ],
+    hideMenuItems: ["Delete", "Rename", "Make a copy"],
+    makeEditorsReadOnly: true,
+    hideCreateButtons: true,
+  },
+};
+
+function readJSON(filePath, fallback = {}) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf-8"));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJSON(filePath, data) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+}
+
+function getRoles() {
+  const custom = readJSON(ROLES_FILE);
+  return { ...BUILTIN_ROLES, ...custom };
+}
+
+function getRoleDefinition(roleName) {
+  const roles = getRoles();
+  return roles[roleName] || null;
+}
+
+function createRole(name, def) {
+  if (BUILTIN_ROLES[name]) return null;
+  const roles = readJSON(ROLES_FILE);
+  if (roles[name]) return null;
+  roles[name] = { ...def, builtin: false, displayName: def.displayName || name };
+  writeJSON(ROLES_FILE, roles);
+  return roles[name];
+}
+
+function updateRole(name, updates) {
+  if (BUILTIN_ROLES[name]) return null;
+  const roles = readJSON(ROLES_FILE);
+  if (!roles[name]) return null;
+  const def = roles[name];
+  if (updates.displayName !== undefined) def.displayName = updates.displayName;
+  if (updates.permissions !== undefined) {
+    def.permissions = validatePermissions(updates.permissions);
+  }
+  if (updates.fileAccess !== undefined) {
+    def.fileAccess = validateFileAccess(updates.fileAccess);
+  }
+  if (updates.ribbonHiddenPluginIds !== undefined) {
+    def.ribbonHiddenPluginIds = updates.ribbonHiddenPluginIds;
+  }
+  if (updates.hideMenuItems !== undefined) {
+    def.hideMenuItems = updates.hideMenuItems;
+  }
+  if (updates.makeEditorsReadOnly !== undefined) {
+    def.makeEditorsReadOnly = updates.makeEditorsReadOnly;
+  }
+  if (updates.hideCreateButtons !== undefined) {
+    def.hideCreateButtons = updates.hideCreateButtons;
+  }
+  writeJSON(ROLES_FILE, roles);
+  return def;
+}
+
+function deleteRole(name) {
+  if (BUILTIN_ROLES[name]) return false;
+  const roles = readJSON(ROLES_FILE);
+  if (!roles[name]) return false;
+  delete roles[name];
+  writeJSON(ROLES_FILE, roles);
+  return true;
+}
+
+function validatePermissions(perms) {
+  if (!Array.isArray(perms)) return [];
+  return perms.filter((p) => ALL_PERMISSIONS.includes(p) || p === "*");
+}
+
+function validateFileAccess(fa) {
+  if (!fa || typeof fa !== "object") return null;
+
+  const types = ["blacklist", "whitelist"];
+  if (!types.includes(fa.type)) return null;
+
+  return {
+    type: fa.type,
+    paths: Array.isArray(fa.paths) ? fa.paths : [],
+    tags: Array.isArray(fa.tags) ? fa.tags : [],
+    excludePaths: Array.isArray(fa.excludePaths) ? fa.excludePaths : [],
+    excludeTags: Array.isArray(fa.excludeTags) ? fa.excludeTags : [],
+  };
+}
+
+function hasPermission(user, permission) {
+  if (!user) return false;
+  const role = getRoleDefinition(user.role);
+  if (!role) return false;
+  if (role.permissions.includes("*")) return true;
+  const permBase = permission.split(":")[0];
+  return (
+    role.permissions.includes(permission)
+    || (permBase !== "*" && role.permissions.includes(permBase + ":*"))
+    || (permission.endsWith(":*") && role.permissions.includes("*"))
+  );
+}
+
+function canUserVaultAccess(user, vaultId, level) {
+  if (!user) return false;
+  const role = getRoleDefinition(user.role);
+  if (!role) return false;
+  if (role.permissions.includes("*")) return true;
+  if (role.permissions.includes("vault:delete") && role.permissions.includes("vault:create")) return true;
+
+  if (level === "read") return role.permissions.includes("vault:read");
+  if (level === "write") return role.permissions.includes("file:write");
+  return false;
+}
+
+/**
+ * Check if a user has access to a specific file path.
+ * Returns true if access is allowed (considering whitelist/blacklist rules).
+ */
+function hasFileAccess(user, filePath) {
+  if (!user || !filePath) return true;
+  const role = getRoleDefinition(user.role);
+  if (!role) return false;
+  if (role.permissions.includes("*")) return true;
+
+  const fa = role.fileAccess;
+  if (!fa) return true;
+
+  const normalizedPath = filePath.replace(/\\/g, "/");
+
+  const matches = fa.paths.some((pattern) =>
+    minimatch(normalizedPath, pattern)
+  );
+
+  const excluded = fa.excludePaths.some((pattern) =>
+    minimatch(normalizedPath, pattern)
+  );
+
+  if (excluded) return fa.type === "whitelist" ? false : true;
+
+  if (fa.type === "whitelist") {
+    return matches;
+  }
+  if (fa.type === "blacklist") {
+    return !matches;
+  }
+
+  return true;
+}
+
+function getClientPermissions(user) {
+  if (!user) return {};
+  const role = getRoleDefinition(user.role);
+  if (!role) return {};
+  return {
+    role: user.role,
+    permissions: role.permissions,
+    fileAccess: role.fileAccess,
+    ribbonHiddenPluginIds: role.ribbonHiddenPluginIds || [],
+    hideMenuItems: role.hideMenuItems || [],
+    makeEditorsReadOnly: role.makeEditorsReadOnly || false,
+    hideCreateButtons: role.hideCreateButtons || false,
+  };
+}
+
+function getAllRoles(includeBuiltin = true) {
+  const roles = getRoles();
+  const result = [];
+  for (const [name, def] of Object.entries(roles)) {
+    if (!includeBuiltin && def.builtin) continue;
+    result.push({ name, ...def });
+  }
+  return result;
+}
+
+function ensureRolesFile() {
+  if (!fs.existsSync(ROLES_FILE)) {
+    writeJSON(ROLES_FILE, {});
+  }
+}
+
+ensureRolesFile();
+
+module.exports = {
+  ALL_PERMISSIONS,
+  BUILTIN_ROLES,
+  getRoles,
+  getRoleDefinition,
+  createRole,
+  updateRole,
+  deleteRole,
+  hasPermission,
+  canUserVaultAccess,
+  hasFileAccess,
+  getClientPermissions,
+  getAllRoles,
+  validatePermissions,
+  validateFileAccess,
+};

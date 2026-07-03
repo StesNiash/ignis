@@ -1,5 +1,6 @@
 const { verify: verifyToken } = require("./token");
 const { userHasVaultAccess } = require("./store");
+const { hasPermission } = require("./roles");
 
 function extractToken(req) {
   const authHeader = req.headers.authorization;
@@ -70,12 +71,24 @@ function requireRole(...roles) {
   };
 }
 
+function requirePermission(permission) {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    if (!hasPermission(req.user, permission)) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+    next();
+  };
+}
+
 function requireVaultAccess(level) {
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ error: "Authentication required" });
     }
-    if (req.user.role === "admin") {
+    if (hasPermission(req.user, "*") || hasPermission(req.user, "admin:*")) {
       return next();
     }
 
@@ -99,6 +112,7 @@ module.exports = {
   authRequired,
   authOptional,
   requireRole,
+  requirePermission,
   requireVaultAccess,
   extractToken,
   wsExtractToken,

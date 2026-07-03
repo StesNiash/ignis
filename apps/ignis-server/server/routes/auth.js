@@ -7,6 +7,7 @@ const {
   hasAnyUsers,
 } = require("../auth/store");
 const { authRequired } = require("../auth/middleware");
+const { getClientPermissions } = require("../auth/roles");
 
 const router = express.Router();
 
@@ -60,7 +61,8 @@ router.post("/setup", async (req, res) => {
 });
 
 router.get("/me", authRequired, (req, res) => {
-  res.json({ username: req.user.username, role: req.user.role });
+  const perms = getClientPermissions(req.user);
+  res.json(perms);
 });
 
 router.post("/logout", (req, res) => {

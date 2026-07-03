@@ -80,16 +80,14 @@ function setVaultPermissions(vaultId, settings) {
 }
 
 function userHasVaultAccess(username, role, vaultId, requiredLevel) {
-  if (role === "admin") return true;
+  const { canUserVaultAccess: checkRoleAccess } = require("./roles");
+
+  if (checkRoleAccess({ username, role }, vaultId, requiredLevel)) return true;
 
   const perms = getPermissions();
   const vaultPerms = perms[vaultId];
 
-  if (!vaultPerms) {
-    if (requiredLevel === "read") return true;
-    if (requiredLevel === "write") return role === "editor";
-    return false;
-  }
+  if (!vaultPerms) return false;
 
   if (requiredLevel === "read") {
     return vaultPerms.readers.includes(username) || vaultPerms.editors.includes(username);

@@ -13,34 +13,30 @@ import { initStatusBar } from "./status-bar.js";
 import { WorkspacePickerModal } from "./workspace-picker.js";
 import { startDemoGuards, stopDemoGuards } from "./demo-guards.js";
 
-let currentUser = null;
+let userPermissions = null;
 let readOnlyObserver = null;
 
-// Plugin IDs whose ribbon items are hidden for readers.
-// Language-independent and stable across Obsidian versions.
-const HIDDEN_PLUGIN_IDS = new Set([
-  "daily-notes",
-  "templates",
-  "canvas",
-  "note-composer",
-  "audio-recorder",
-  "bases",
-]);
+function hasPermission(perm) {
+  if (!userPermissions) return false;
+  return userPermissions.permissions.includes("*") || userPermissions.permissions.includes(perm);
+}
 
-// English text for dangerous context-menu items (only place we still match text).
-// We match against exact Obsidian internal labels – numbers are locale file line refs.
-const HIDE_MENU_TEXTS_EN = new Set([
-  "Delete",
-  "Rename",
-  "Make a copy",
-]);
+function isReadOnly() {
+  if (!userPermissions) return false;
+  if (userPermissions.permissions.includes("*")) return false;
+  return !userPermissions.permissions.includes("file:write")
+    && !userPermissions.permissions.includes("file:create")
+    && !userPermissions.permissions.includes("file:delete")
+    && !userPermissions.permissions.includes("file:rename");
+}
 
 async function fetchCurrentUser() {
   try {
     const res = await fetch("/api/auth/me");
     if (res.ok) {
-      currentUser = await res.json();
-      window.__ignisUserRole = currentUser.role;
+      userPermissions = await res.json();
+      window.__ignisUserRole = userPermissions.role;
+      window.__ignisPermissions = userPermissions;
     }
   } catch {}
 }
@@ -52,9 +48,11 @@ function makeAllEditorsReadOnly() {
 }
 
 function hideDangerousMenuItems() {
+  if (!userPermissions?.hideMenuItems?.length) return;
+  const hideSet = new Set(userPermissions.hideMenuItems);
   document.querySelectorAll(".menu-item").forEach((el) => {
     const text = (el.getAttribute("aria-label") || el.textContent || "").trim();
-    if (HIDE_MENU_TEXTS_EN.has(text)) {
+    if (hideSet.has(text)) {
       el.style.display = "none";
     }
   });
@@ -77,14 +75,16 @@ function enforceReadOnly() {
 }
 
 function applyRibbonConfig() {
+  if (!userPermissions?.ribbonHiddenPluginIds?.length) return;
   const ribbon = window.app?.workspace?.leftRibbon;
   if (!ribbon?.items) return;
 
+  const hiddenSet = new Set(userPermissions.ribbonHiddenPluginIds);
   let changed = false;
 
   for (const item of ribbon.items) {
     const pluginId = item.id?.split(":")[0];
-    const shouldHide = HIDDEN_PLUGIN_IDS.has(pluginId);
+    const shouldHide = hiddenSet.has(pluginId);
     if (item.hidden !== shouldHide) {
       item.hidden = shouldHide;
       changed = true;
@@ -133,14 +133,17 @@ class IgnisBridgePlugin extends Plugin {
     this._statusBarInterval = initStatusBar(this);
     await fetchCurrentUser();
 
-    if (currentUser?.role === "reader") {
-      enforceReadOnly();
-    }
-
-    if (currentUser?.role !== "reader") {
-      this.addRibbonIcon("upload", "Upload file", () => {
-        showFilePicker(this.app);
-      });
+    // Read-only enforcement: driven by permissions, not hardcoded role name
+    if (isReadOnly()) {
+      if (userPermissions.makeEditorsReadOnly) {
+        enforceReadOnly();
+      }
+    } else {
+      if (userPermissions.permissions.includes("file:write")) {
+        this.addRibbonIcon("upload", "Upload file", () => {
+          showFilePicker(this.app);
+        });
+      }
     }
 
     this.addCommand({
@@ -161,27 +164,35 @@ class IgnisBridgePlugin extends Plugin {
       }),
     );
 
-    if (currentUser) {
-      this.addRibbonIcon("user", `Signed in as ${currentUser.username}`, (evt) => {
+    if (userPermissions) {
+      const username = userPermissions.role;
+      this.addRibbonIcon("user", `Signed in as ${username}`, (evt) => {
         const menu = new Menu();
 
         menu.addItem((item) =>
           item
-            .setTitle(`User: ${currentUser.username}`)
+            .setTitle(`User: ${username}`)
             .setIcon("user")
             .setDisabled(true),
         );
 
         menu.addItem((item) =>
           item
-            .setTitle(`Role: ${currentUser.role}`)
+            .setTitle(`Role: ${userPermissions.role || "unknown"}`)
             .setIcon("shield")
+            .setDisabled(true),
+        );
+
+        menu.addItem((item) =>
+          item
+            .setTitle(`Permissions: ${(userPermissions.permissions || []).join(", ") || "none"}`)
+            .setIcon("key")
             .setDisabled(true),
         );
 
         menu.addSeparator();
 
-        if (currentUser.role === "admin") {
+        if (hasPermission("admin:*")) {
           menu.addItem((item) =>
             item
               .setTitle("Admin Dashboard")

@@ -1,21 +1,26 @@
 <script>
   import { onMount } from "svelte";
-  import { Users, Shield, Settings } from "lucide-svelte";
+  import { Users, Shield, Settings, ListChecks } from "lucide-svelte";
   import Modal from "../../components/layout/Modal.svelte";
   import Button from "../../components/input/Button.svelte";
   import UserList from "./UserList.svelte";
   import VaultPermissions from "./VaultPermissions.svelte";
+  import RoleList from "./RoleList.svelte";
+  import RoleEditor from "./RoleEditor.svelte";
 
   let modalRef;
   let activeTab = "users";
   let users = [];
   let vaults = [];
   let permissions = {};
+  let roles = [];
+  let editingRole = null;
   let error = "";
 
   const tabs = [
     { id: "users", label: "Users", icon: Users },
-    { id: "permissions", label: "Vault Permissions", icon: Shield },
+    { id: "roles", label: "Roles", icon: Shield },
+    { id: "permissions", label: "Vault Access", icon: ListChecks },
   ];
 
   async function fetchUsers() {
@@ -48,8 +53,18 @@
     }
   }
 
+  async function fetchRoles() {
+    try {
+      const res = await fetch("/api/admin/roles");
+      if (!res.ok) throw new Error("Failed to fetch roles");
+      roles = await res.json();
+    } catch (e) {
+      error = e.message;
+    }
+  }
+
   async function refresh() {
-    await Promise.all([fetchUsers(), fetchVaults(), fetchPermissions()]);
+    await Promise.all([fetchUsers(), fetchVaults(), fetchPermissions(), fetchRoles()]);
   }
 
   onMount(refresh);
@@ -57,9 +72,10 @@
 
 <Modal
   title="Admin Dashboard"
-  width="700px"
+  width="780px"
   bind:this={modalRef}
   closeOnOverlayClick={false}
+  on:escape={editingRole ? () => (editingRole = null) : undefined}
 >
   <svelte:fragment slot="icon">
     <Settings size="1.25rem" />
@@ -85,7 +101,16 @@
       {/if}
 
       {#if activeTab === "users"}
-        <UserList {users} {refresh} />
+        <UserList {users} {roles} {refresh} />
+      {:else if activeTab === "roles"}
+        {#if editingRole}
+          <RoleEditor
+            role={editingRole}
+            onSave={() => { editingRole = null; refresh(); }}
+            onClose={() => (editingRole = null)}
+          />
+        {/if}
+        <RoleList {roles} {refresh} onEditRole={(r) => (editingRole = r)} />
       {:else if activeTab === "permissions"}
         <VaultPermissions {vaults} {permissions} {users} {refresh} />
       {/if}

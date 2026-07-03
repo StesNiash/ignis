@@ -196,7 +196,8 @@
   }
 
   onMount(() => {
-    isAdmin = currentUser?.role === "admin";
+    const perms = window.__ignisPermissions;
+    isAdmin = perms?.permissions?.includes("*") || perms?.permissions?.includes("admin:*");
     refreshVaults();
     fetchVersion();
   });

@@ -25,6 +25,9 @@ const { authRequired, wsExtractToken } = require("./auth/middleware");
 const { verify: verifyToken } = require("./auth/token");
 const authRoutes = require("./routes/auth");
 const adminRoutes = require("./routes/admin");
+const {
+  getClientPermissions,
+} = require("./auth/roles");
 writeCoalescer.configure({ writeCoalesceMs: settings.get("writeCoalesceMs") });
 const { flushAll } = writeCoalescer;
 const { setupDemo, wireDemoWebSocket } = require("./demo");
@@ -200,12 +203,12 @@ app.get(["/", "/index.html"], authRequired, (req, res) => {
   res.set("Cache-Control", "no-cache");
   let html = buildIndexHtml();
 
-  const role = req.user?.role || "";
-  const roleScript = `<script>window.__ignisUserRole = "${role}";</script>`;
+  const perms = getClientPermissions(req.user);
+  const permsScript = `<script>window.__ignisPermissions = ${JSON.stringify(perms)};window.__ignisUserRole = ${JSON.stringify(perms.role)};</script>`;
 
-  let extraHead = roleScript;
+  let extraHead = permsScript;
 
-  if (role === "reader") {
+  if (perms.hideCreateButtons) {
     extraHead += `<style>
       body.ignis-readonly .workspace-leaf-content[data-type="file-explorer"] .nav-buttons-container .nav-action-button:nth-child(1),
       body.ignis-readonly .workspace-leaf-content[data-type="file-explorer"] .nav-buttons-container .nav-action-button:nth-child(2){display:none}

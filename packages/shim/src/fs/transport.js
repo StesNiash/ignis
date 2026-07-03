@@ -24,7 +24,13 @@ const KEEPALIVE_MAX_BYTES = 64 * 1024;
 // keepalive lets a request finish after the page starts unloading.
 // Its body is capped at 64KB across a shared pool, so opt in only under that limit.
 function isReadOnly() {
-  return window.__ignisUserRole === "reader";
+  const perms = window.__ignisPermissions;
+  if (!perms) return false;
+  if (perms.permissions.includes("*")) return false;
+  return !perms.permissions.includes("file:write")
+    && !perms.permissions.includes("file:create")
+    && !perms.permissions.includes("file:delete")
+    && !perms.permissions.includes("file:rename");
 }
 
 function withinKeepaliveCap(body) {
