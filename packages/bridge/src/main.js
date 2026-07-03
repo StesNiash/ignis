@@ -16,23 +16,15 @@ import { startDemoGuards, stopDemoGuards } from "./demo-guards.js";
 let currentUser = null;
 let readOnlyObserver = null;
 
-// Plugin IDs whose ribbon items are safe for readers (read-only).
-const SAFE_PLUGIN_IDS = new Set([
-  "command-palette",
-  "switcher",
-  "graph",
-  "search",
-  "backlink",
-  "outline",
-  "file-explorer",
-  "bookmarks",
-  "tag-pane",
-  "starred",
-  "random-note",
-  "sync",
-  "publish",
-  "markdown-importer",
-  "ignis-bridge",
+// Plugin IDs whose ribbon items are hidden for readers.
+// Language-independent and stable across Obsidian versions.
+const HIDDEN_PLUGIN_IDS = new Set([
+  "daily-notes",
+  "templates",
+  "canvas",
+  "note-composer",
+  "audio-recorder",
+  "bases",
 ]);
 
 // English text for dangerous context-menu items (only place we still match text).
@@ -92,9 +84,9 @@ function applyRibbonConfig() {
 
   for (const item of ribbon.items) {
     const pluginId = item.id?.split(":")[0];
-    const shouldShow = SAFE_PLUGIN_IDS.has(pluginId);
-    if (item.hidden === shouldShow) {
-      item.hidden = !shouldShow;
+    const shouldHide = HIDDEN_PLUGIN_IDS.has(pluginId);
+    if (item.hidden !== shouldHide) {
+      item.hidden = shouldHide;
       changed = true;
     }
   }
