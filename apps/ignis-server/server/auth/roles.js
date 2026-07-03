@@ -51,8 +51,6 @@ const BUILTIN_ROLES = {
       "bases",
     ],
     hideMenuItems: ["Delete", "Rename", "Make a copy"],
-    makeEditorsReadOnly: true,
-    hideCreateButtons: true,
   },
 };
 
@@ -268,14 +266,23 @@ function getClientPermissions(user) {
   if (!user) return {};
   const role = getRoleDefinition(user.role);
   if (!role) return {};
+  const perms = role.permissions;
+  const isSuper = perms.includes("*");
+  const canWrite = isSuper || perms.includes("file:write");
+  const canCreate = isSuper || perms.includes("file:create");
+
   return {
     role: user.role,
-    permissions: role.permissions,
+    permissions: perms,
     fileAccess: role.fileAccess,
     ribbonHiddenPluginIds: role.ribbonHiddenPluginIds || [],
     hideMenuItems: role.hideMenuItems || [],
-    makeEditorsReadOnly: role.makeEditorsReadOnly || false,
-    hideCreateButtons: role.hideCreateButtons || false,
+    makeEditorsReadOnly: role.makeEditorsReadOnly !== undefined
+      ? role.makeEditorsReadOnly
+      : !canWrite,
+    hideCreateButtons: role.hideCreateButtons !== undefined
+      ? role.hideCreateButtons
+      : !canCreate,
   };
 }
 

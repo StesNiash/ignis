@@ -41,10 +41,14 @@ async function fetchCurrentUser() {
   } catch {}
 }
 
+function blockEditingInput(e) {
+  if (e.target.closest(".cm-editor .cm-content")) {
+    e.preventDefault();
+  }
+}
+
 function makeAllEditorsReadOnly() {
-  document.querySelectorAll(".cm-editor .cm-content").forEach((el) => {
-    el.setAttribute("contenteditable", "false");
-  });
+  document.addEventListener("beforeinput", blockEditingInput, true);
 }
 
 function hideDangerousMenuItems() {
@@ -63,7 +67,6 @@ function enforceReadOnly() {
   applyRibbonConfig();
 
   readOnlyObserver = new MutationObserver(() => {
-    makeAllEditorsReadOnly();
     applyRibbonConfig();
     hideDangerousMenuItems();
   });
@@ -101,9 +104,7 @@ function stopEnforceReadOnly() {
     readOnlyObserver.disconnect();
     readOnlyObserver = null;
   }
-  document.querySelectorAll(".cm-editor .cm-content").forEach((el) => {
-    el.setAttribute("contenteditable", "true");
-  });
+  document.removeEventListener("beforeinput", blockEditingInput, true);
 }
 
 function showAdminDashboard() {

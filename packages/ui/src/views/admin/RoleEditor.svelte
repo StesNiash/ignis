@@ -21,8 +21,6 @@
   let fileAccessExcludeTags = "";
   let ribbonHiddenPluginIds = "";
   let hideMenuItems = "";
-  let makeEditorsReadOnly = false;
-  let hideCreateButtons = false;
   let hideInaccessible = false;
   let saving = false;
   let error = "";
@@ -41,8 +39,6 @@
     fileAccessExcludeTags = (role.fileAccess?.excludeTags || []).join(", ");
     ribbonHiddenPluginIds = (role.ribbonHiddenPluginIds || []).join(", ");
     hideMenuItems = (role.hideMenuItems || []).join(", ");
-    makeEditorsReadOnly = !!role.makeEditorsReadOnly;
-    hideCreateButtons = !!role.hideCreateButtons;
     hideInaccessible = role.fileAccess?.hideInaccessible !== undefined
       ? !!role.fileAccess.hideInaccessible
       : !!(role.fileAccess?.type && ((role.fileAccess?.paths?.length > 0) || (role.fileAccess?.tags?.length > 0)));
@@ -63,6 +59,15 @@
     return permissions.includes("*") || permissions.includes(perm);
   }
 
+  $: areReadOnly = permissions.includes("file:read")
+    && !permissions.includes("*")
+    && !permissions.includes("file:write")
+    && !permissions.includes("file:create")
+    && !permissions.includes("file:delete")
+    && !permissions.includes("file:rename");
+
+  $: allSet = permissions.includes("*");
+
   async function handleSave() {
     saving = true;
     error = "";
@@ -72,8 +77,6 @@
       permissions: permissions.includes("*") ? ["*"] : permissions,
       ribbonHiddenPluginIds: ribbonHiddenPluginIds.split(",").map((s) => s.trim()).filter(Boolean),
       hideMenuItems: hideMenuItems.split(",").map((s) => s.trim()).filter(Boolean),
-      makeEditorsReadOnly,
-      hideCreateButtons,
     };
 
     if (fileAccessType) {
@@ -138,6 +141,36 @@
     </label>
 
     <div class="section-label">Permissions</div>
+
+    <div class="perm-presets">
+      <label class="perm-check">
+        <input
+          type="checkbox"
+          checked={areReadOnly}
+          on:change={() => {
+            if (!areReadOnly) {
+              const other = permissions.filter((p) => !p.startsWith("file:") && p !== "vault:read");
+              permissions = [...other, "file:read", "vault:read"];
+            }
+          }}
+        />
+        <Shield size="0.875rem" />
+        <strong>Read-only</strong> — view files, no editing
+      </label>
+
+      <label class="perm-check">
+        <input
+          type="checkbox"
+          checked={allSet}
+          on:change={() => {
+            permissions = allSet ? [] : ["*"];
+          }}
+        />
+        <Shield size="0.875rem" />
+        <strong>All permissions</strong> — super-admin
+      </label>
+    </div>
+
     <div class="perm-sections">
       {#each sections as section}
         <button
@@ -151,69 +184,55 @@
     </div>
 
     <div class="perm-checks">
-      {#if activeSection === "Files" && !permissions.includes("*")}
+      {#if activeSection === "Files" && !allSet}
         <label class="perm-check">
-          <input type="checkbox" checked={hasPerm("file:read")} on:change={() => togglePermission("file:read")} />
+          <input type="checkbox" checked={allSet || permissions.includes("file:read")} on:change={() => togglePermission("file:read")} />
           <Eye size="0.875rem" />
           Read files — view content
         </label>
         <label class="perm-check">
-          <input type="checkbox" checked={hasPerm("file:write")} on:change={() => togglePermission("file:write")} />
+          <input type="checkbox" checked={allSet || permissions.includes("file:write")} on:change={() => togglePermission("file:write")} />
           <Pen size="0.875rem" />
           Edit files — modify content
         </label>
         <label class="perm-check">
-          <input type="checkbox" checked={hasPerm("file:create")} on:change={() => togglePermission("file:create")} />
+          <input type="checkbox" checked={allSet || permissions.includes("file:create")} on:change={() => togglePermission("file:create")} />
           <Plus size="0.875rem" />
           Create — new files/folders
         </label>
         <label class="perm-check">
-          <input type="checkbox" checked={hasPerm("file:delete")} on:change={() => togglePermission("file:delete")} />
+          <input type="checkbox" checked={allSet || permissions.includes("file:delete")} on:change={() => togglePermission("file:delete")} />
           <Trash2 size="0.875rem" />
           Delete — remove files/folders
         </label>
         <label class="perm-check">
-          <input type="checkbox" checked={hasPerm("file:rename")} on:change={() => togglePermission("file:rename")} />
+          <input type="checkbox" checked={allSet || permissions.includes("file:rename")} on:change={() => togglePermission("file:rename")} />
           <Pen size="0.875rem" />
           Rename — rename files/folders
         </label>
       {:else if activeSection === "Vaults"}
         <label class="perm-check">
-          <input type="checkbox" checked={hasPerm("vault:read")} on:change={() => togglePermission("vault:read")} disabled={permissions.includes("*")} />
+          <input type="checkbox" checked={allSet || permissions.includes("vault:read")} on:change={() => togglePermission("vault:read")} disabled={allSet} />
           <Vault size="0.875rem" />
           Vault access — enter vault
         </label>
         <label class="perm-check">
-          <input type="checkbox" checked={hasPerm("vault:create")} on:change={() => togglePermission("vault:create")} disabled={permissions.includes("*")} />
+          <input type="checkbox" checked={allSet || permissions.includes("vault:create")} on:change={() => togglePermission("vault:create")} disabled={allSet} />
           <Plus size="0.875rem" />
           Create vaults
         </label>
         <label class="perm-check">
-          <input type="checkbox" checked={hasPerm("vault:delete")} on:change={() => togglePermission("vault:delete")} disabled={permissions.includes("*")} />
+          <input type="checkbox" checked={allSet || permissions.includes("vault:delete")} on:change={() => togglePermission("vault:delete")} disabled={allSet} />
           <Trash2 size="0.875rem" />
           Delete vaults
         </label>
       {:else if activeSection === "Admin"}
         <label class="perm-check">
-          <input type="checkbox" checked={hasPerm("admin:*")} on:change={() => togglePermission("admin:*")} disabled={permissions.includes("*")} />
+          <input type="checkbox" checked={allSet || permissions.includes("admin:*")} on:change={() => togglePermission("admin:*")} disabled={allSet} />
           <Shield size="0.875rem" />
           Admin panel — manage users/roles/vaults
         </label>
       {/if}
-    </div>
-
-    <div class="perm-all">
-      <label class="perm-check">
-        <input
-          type="checkbox"
-          checked={permissions.includes("*")}
-          on:change={() => {
-            permissions = permissions.includes("*") ? [] : ["*"];
-          }}
-        />
-        <Shield size="0.875rem" />
-        <strong>All permissions</strong> (super-admin, overrides everything below)
-      </label>
     </div>
 
     <div class="section-label"><FolderKey size="0.875rem" /> File Access Rules</div>
@@ -260,15 +279,6 @@
       <input type="text" bind:value={hideMenuItems} placeholder="Delete, Rename, Make a copy" />
     </label>
 
-    <div class="section-label">Client Read-Only Behavior</div>
-    <label class="perm-check">
-      <input type="checkbox" bind:checked={makeEditorsReadOnly} />
-      Make editors read-only (contenteditable=false)
-    </label>
-    <label class="perm-check">
-      <input type="checkbox" bind:checked={hideCreateButtons} />
-      Hide "New note" / "New folder" buttons in file explorer
-    </label>
   </div>
 
   {#if error}
@@ -398,11 +408,14 @@
     cursor: pointer;
   }
 
-  .perm-all {
+  .perm-presets {
+    display: flex;
+    gap: 1.5rem;
     padding: 0.5rem;
     background: var(--background-primary);
     border-radius: 6px;
-    border: 1px dashed var(--interactive-accent);
+    border: 1px dashed var(--text-accent);
+    margin-bottom: 0.5rem;
   }
 
   .fa-config {
