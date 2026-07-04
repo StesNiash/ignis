@@ -42,7 +42,7 @@ async function fetchCurrentUser() {
 }
 
 function blockEditingInput(e) {
-  if (e.target.closest(".cm-editor .cm-content")) {
+  if (e.target.closest(".cm-editor .cm-content, .inline-title")) {
     e.preventDefault();
   }
 }
