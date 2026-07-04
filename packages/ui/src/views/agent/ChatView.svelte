@@ -1,5 +1,5 @@
 <script>
-  import { renderResponse } from "./chat-renderer.js";
+  import { renderResponse, renderFromBackend, parseMarkdown } from "./chat-renderer.js";
 
   export let linkHandler = null;
   export let loadingHtml = null;
@@ -149,6 +149,27 @@
     }
   }
 
+  function buildHistory(maxPairs = 5) {
+    const pairs = [];
+    for (let i = messages.length - 1; i >= 0 && pairs.length < maxPairs; i--) {
+      if (messages[i].role === "agent") {
+        const userMsg = i > 0 && messages[i - 1].role === "user" ? messages[i - 1] : null;
+        if (userMsg) {
+          pairs.unshift({ user: userMsg.content, agent: messages[i].content });
+          i--;
+        }
+      }
+    }
+
+    if (pairs.length === 0) return "";
+
+    let ctx = "";
+    for (const p of pairs) {
+      ctx += `Q: ${p.user}\nA: ${p.agent}\n\n`;
+    }
+    return ctx.trimEnd();
+  }
+
   async function sendMessage() {
     const query = input.trim();
     if (!query || loading) return;
@@ -161,11 +182,14 @@
     input = "";
     loading = true;
 
+    const history = buildHistory();
+    const enhancedQuery = history ? `${history}\nCurrent: ${query}` : query;
+
     try {
       const res = await fetch(`${API}/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query: enhancedQuery }),
       });
 
       if (!res.ok) {
@@ -173,13 +197,79 @@
         throw new Error(err.error || `Server error (${res.status})`);
       }
 
-      const data = await res.json();
-      const html = renderResponse(data);
-      messages = [...messages, { role: "agent", content: data.answer, html }];
+      const contentType = res.headers.get("content-type") || "";
+
+      if (contentType.includes("text/event-stream")) {
+        await handleSSE(res);
+      } else {
+        const data = await res.json();
+        const html = renderResponse(data);
+        messages = [...messages, { role: "agent", content: data.answer, html }];
+      }
     } catch (err) {
       messages = [...messages, { role: "error", content: err.message || "Unknown error" }];
     } finally {
       loading = false;
+    }
+  }
+
+  async function handleSSE(res) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let eventType = "";
+    let answerText = "";
+    let citations = [];
+    let subgraph = { nodes: [], edges: [] };
+    let hasError = false;
+
+    messages = [...messages, { role: "agent", content: "", html: "" }];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("event: ")) {
+          eventType = line.slice(7).trim();
+        } else if (line.startsWith("data: ")) {
+          try {
+            const payload = JSON.parse(line.slice(6));
+            switch (eventType) {
+              case "token": {
+                const text = typeof payload === "string" ? payload : String(payload);
+                answerText += text;
+                const html = `<div class="agent-block agent-block--answer">${parseMarkdown(answerText)}<span class="agent-cursor">|</span></div>`;
+                const rest = messages.slice(0, -1);
+                messages = [...rest, { role: "agent", content: answerText, html }];
+                break;
+              }
+              case "citations":
+                citations = Array.isArray(payload) ? payload : [];
+                break;
+              case "subgraph":
+                subgraph = payload && payload.nodes ? payload : { nodes: [], edges: [] };
+                break;
+              case "error":
+                hasError = true;
+                const errText = typeof payload === "string" ? payload : (payload?.message || "Backend error");
+                const restErr = messages.slice(0, -1);
+                messages = [...restErr, { role: "error", content: errText }];
+                break;
+            }
+          } catch { /* skip malformed events */ }
+        }
+      }
+    }
+
+    if (!hasError) {
+      const html = renderFromBackend(answerText, subgraph, citations);
+      const rest = messages.slice(0, -1);
+      messages = [...rest, { role: "agent", content: answerText, html }];
     }
   }
 
@@ -197,13 +287,13 @@
   <div class="agent-chat-header">
     <div class="agent-chat-header-left">
       <button class="agent-chat-sessions-btn" on:click={toggleSessions} title="Sessions">
-        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+      </button>
+      <button class="agent-chat-new-btn" on:click={newChat} title="New Chat">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       </button>
       <h3>{sessionTitle}</h3>
     </div>
-    <button class="agent-chat-new-btn" on:click={newChat} title="New Chat">
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-    </button>
   </div>
 
   <div class="agent-chat-body">
@@ -336,9 +426,13 @@
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    padding: 4px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
     border-radius: 4px;
     display: flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
   }
 
@@ -352,9 +446,13 @@
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    padding: 4px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
     border-radius: 4px;
     display: flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
   }
 
@@ -457,6 +555,8 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
+    user-select: text;
+    -webkit-user-select: text;
   }
 
   :global(.agent-chat-placeholder) {
@@ -531,7 +631,38 @@
 
   :global(.agent-block--answer) {
     margin-top: 0;
-    white-space: pre-wrap;
+  }
+
+  :global(.agent-block--answer h2),
+  :global(.agent-block--answer h3),
+  :global(.agent-block--answer h4) {
+    margin: 10px 0 4px;
+    font-size: 1em;
+  }
+
+  :global(.agent-block--answer h3) { font-weight: 700; }
+  :global(.agent-block--answer h4) { font-weight: 600; }
+
+  :global(.agent-block--answer p) { margin: 4px 0; }
+  :global(.agent-block--answer ul),
+  :global(.agent-block--answer ol) { margin: 4px 0; padding-left: 20px; }
+  :global(.agent-block--answer li) { margin: 2px 0; }
+  :global(.agent-block--answer code) {
+    background: var(--background-modifier-border);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 0.85em;
+  }
+  :global(.agent-block--answer strong) { font-weight: 700; }
+  :global(.agent-block--answer em) { font-style: italic; }
+  :global(.agent-block--answer hr) {
+    border: none;
+    border-top: 1px solid var(--background-modifier-border);
+    margin: 8px 0;
+  }
+  :global(.agent-block--answer a) {
+    color: var(--link-color);
+    text-decoration: underline;
   }
 
   :global(.agent-block-label) {
@@ -650,5 +781,15 @@
   @keyframes agent-dot-pulse {
     0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
     40% { opacity: 1; transform: scale(1.1); }
+  }
+
+  :global(.agent-cursor) {
+    animation: agent-blink 1s step-end infinite;
+    color: var(--interactive-accent);
+    font-weight: 700;
+  }
+
+  @keyframes agent-blink {
+    50% { opacity: 0; }
   }
 </style>

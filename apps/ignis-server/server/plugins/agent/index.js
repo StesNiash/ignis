@@ -5,6 +5,7 @@ const { verify: verifyToken } = require("../../auth/token");
 const { extractToken } = require("../../auth/middleware");
 
 const AGENT_BACKEND = process.env.AGENT_API_URL || "http://localhost:8000/api/query";
+const AGENT_API_KEY = process.env.AGENT_API_KEY || "";
 const MOCK_ONLY = process.env.AGENT_MOCK === "true" || !process.env.AGENT_API_URL;
 
 function generateId() {
@@ -150,20 +151,59 @@ module.exports = {
       }
 
       ctx.log(`Proxying query to agent backend for: ${payload.username}`);
+
+      const headers = { "Content-Type": "application/json" };
+      if (AGENT_API_KEY) {
+        headers["X-API-Key"] = AGENT_API_KEY;
+      }
+
+      let upstream;
       try {
-        const upstream = await fetch(AGENT_BACKEND, {
+        upstream = await fetch(AGENT_BACKEND, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(req.body),
+          headers,
+          body: JSON.stringify({ question: query, stream: true }),
         });
-        if (!upstream.ok) {
-          ctx.log(`Agent backend returned ${upstream.status}, falling back to mock`);
-          return res.json(getMockResponse(query));
+      } catch (err) {
+        ctx.log(`Agent backend unreachable: ${err.message}, falling back to mock`);
+        return res.json(getMockResponse(query));
+      }
+
+      if (!upstream.ok) {
+        ctx.log(`Agent backend returned ${upstream.status}, falling back to mock`);
+        return res.json(getMockResponse(query));
+      }
+
+      // SSE pass-through
+      const ct = upstream.headers.get("content-type") || "";
+      if (ct.includes("text/event-stream")) {
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        });
+
+        try {
+          const reader = upstream.body.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            res.write(value);
+          }
+        } catch (err) {
+          ctx.log(`SSE stream error: ${err.message}`);
+          res.write(`event: error\ndata: {"event":"error","data":"${err.message}"}\n\n`);
         }
+        res.end();
+        return;
+      }
+
+      // Non-streaming fallback
+      try {
         const data = await upstream.json();
         res.json(data);
       } catch (err) {
-        ctx.log(`Agent proxy error: ${err.message}, falling back to mock`);
+        ctx.log(`Agent response parse error: ${err.message}`);
         return res.json(getMockResponse(query));
       }
     });

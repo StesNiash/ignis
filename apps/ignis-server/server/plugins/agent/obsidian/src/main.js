@@ -64,7 +64,7 @@ class AgentChatView extends ItemView {
   }
 
   getIcon() {
-    return "message-square";
+    return "menu";
   }
 
   async onOpen() {
@@ -107,7 +107,7 @@ class IgnisAgentPlugin extends Plugin {
 
     this.registerView(VIEW_TYPE, (leaf) => new AgentChatView(leaf));
 
-    this.addRibbonIcon("message-square", VIEW_TITLE, () => {
+    this.addRibbonIcon("menu", VIEW_TITLE, () => {
       this.activateView();
     });
 
