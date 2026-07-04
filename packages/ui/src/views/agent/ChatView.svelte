@@ -22,7 +22,7 @@
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
-  $: if (sessionLoaded && currentSessionId) {
+  $: if (sessionLoaded && currentSessionId && messages) {
     scheduleSave();
   }
 
