@@ -2,14 +2,133 @@
   import { renderResponse } from "./chat-renderer.js";
 
   export let linkHandler = null;
+  export let loadingHtml = null;
+
+  const API = "/api/ext/agent";
+  const PLACEHOLDER = "Ask a question about materials, experiments, properties...";
 
   let messages = [];
   let input = "";
   let loading = false;
-  let errorMessage = "";
   let messagesEl;
+  let currentSessionId = null;
+  let sessionTitle = "New Chat";
+  let sessions = [];
+  let showSessions = false;
+  let sessionLoaded = false;
+  let saveTimer = null;
 
-  const PLACEHOLDER = "Ask a question about materials, experiments, properties...";
+  $: if (messagesEl && messages.length > 0) {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  $: if (sessionLoaded && currentSessionId) {
+    scheduleSave();
+  }
+
+  async function initSessions() {
+    try {
+      const res = await fetch(`${API}/sessions`);
+      if (!res.ok) return;
+      sessions = await res.json();
+
+      if (sessions.length > 0) {
+        await loadSession(sessions[0].id);
+      } else {
+        await createSession();
+      }
+    } catch {
+      await createSession();
+    }
+  }
+
+  async function createSession() {
+    try {
+      const res = await fetch(`${API}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "New Chat" }),
+      });
+      if (!res.ok) return;
+      const s = await res.json();
+      currentSessionId = s.id;
+      sessionTitle = s.title;
+      messages = [];
+      sessionLoaded = true;
+    } catch { /* offline */ }
+  }
+
+  async function loadSession(id) {
+    try {
+      const res = await fetch(`${API}/sessions/${id}`);
+      if (!res.ok) return;
+      const s = await res.json();
+      currentSessionId = s.id;
+      sessionTitle = s.title || "Untitled";
+      messages = s.messages || [];
+      sessionLoaded = true;
+      showSessions = false;
+    } catch { /* offline */ }
+  }
+
+  function scheduleSave() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveSession, 500);
+  }
+
+  async function saveSession() {
+    if (!currentSessionId) return;
+    try {
+      await fetch(`${API}/sessions/${currentSessionId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages, title: sessionTitle }),
+      });
+    } catch { /* offline */ }
+  }
+
+  async function deleteSession(id, e) {
+    e.stopPropagation();
+    try {
+      await fetch(`${API}/sessions/${id}`, { method: "DELETE" });
+      sessions = sessions.filter((s) => s.id !== id);
+      if (id === currentSessionId) {
+        if (sessions.length > 0) {
+          await loadSession(sessions[0].id);
+        } else {
+          await createSession();
+        }
+      }
+    } catch { /* offline */ }
+  }
+
+  async function newChat() {
+    await createSession();
+    await fetchSessions();
+    showSessions = false;
+  }
+
+  async function fetchSessions() {
+    try {
+      const res = await fetch(`${API}/sessions`);
+      if (res.ok) sessions = await res.json();
+    } catch { /* offline */ }
+  }
+
+  function toggleSessions() {
+    showSessions = !showSessions;
+    if (showSessions) fetchSessions();
+  }
+
+  function formatDate(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const now = new Date();
+    const diff = now - d;
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return d.toLocaleDateString();
+  }
 
   function openLink(path, quote) {
     if (linkHandler) {
@@ -30,21 +149,20 @@
     }
   }
 
-  $: if (messagesEl && messages.length > 0) {
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-  }
-
   async function sendMessage() {
     const query = input.trim();
     if (!query || loading) return;
 
+    if (messages.length === 0 && sessionTitle === "New Chat") {
+      sessionTitle = query.slice(0, 40) + (query.length > 40 ? "..." : "");
+    }
+
     messages = [...messages, { role: "user", content: query }];
     input = "";
     loading = true;
-    errorMessage = "";
 
     try {
-      const res = await fetch("/api/ext/agent/query", {
+      const res = await fetch(`${API}/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query }),
@@ -59,8 +177,7 @@
       const html = renderResponse(data);
       messages = [...messages, { role: "agent", content: data.answer, html }];
     } catch (err) {
-      errorMessage = err.message || "Unknown error";
-      messages = [...messages, { role: "error", content: errorMessage }];
+      messages = [...messages, { role: "error", content: err.message || "Unknown error" }];
     } finally {
       loading = false;
     }
@@ -72,52 +189,99 @@
       sendMessage();
     }
   }
+
+  initSessions();
 </script>
 
 <div class="agent-chat-container">
   <div class="agent-chat-header">
-    <h3>Agent Chat</h3>
+    <div class="agent-chat-header-left">
+      <button class="agent-chat-sessions-btn" on:click={toggleSessions} title="Sessions">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </button>
+      <h3>{sessionTitle}</h3>
+    </div>
+    <button class="agent-chat-new-btn" on:click={newChat} title="New Chat">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
   </div>
 
-  <div
-    class="agent-chat-messages"
-    bind:this={messagesEl}
-    role="log"
-    tabindex="0"
-    on:click={handleLinkClick}
-    on:keydown={() => {}}
-  >
-    {#if messages.length === 0}
-      <div class="agent-chat-placeholder">{PLACEHOLDER}</div>
+  <div class="agent-chat-body">
+    {#if showSessions}
+      <div class="agent-sessions-panel">
+        <div class="agent-sessions-panel-header">
+          <span>Sessions</span>
+          <button class="agent-chat-new-btn" on:click={newChat} title="New Chat">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+        </div>
+        <div class="agent-sessions-list">
+          {#each sessions as s (s.id)}
+            <div
+              class="agent-session-item"
+              class:active={s.id === currentSessionId}
+              role="button"
+              tabindex="0"
+              on:click={() => loadSession(s.id)}
+              on:keydown={(e) => { if (e.key === 'Enter') loadSession(s.id); }}
+            >
+              <div class="agent-session-item-title">{s.title || "Untitled"}</div>
+              <div class="agent-session-item-meta">
+                <span>{s.messageCount} msg</span>
+                <span>{formatDate(s.updatedAt)}</span>
+              </div>
+              <button
+                class="agent-session-delete"
+                on:click={(e) => deleteSession(s.id, e)}
+                title="Delete"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              </button>
+            </div>
+          {/each}
+        </div>
+      </div>
     {/if}
 
-    {#each messages as msg (msg === messages[messages.length - 1] ? null : Math.random())}
-      {#if msg.role === "user"}
-        <div class="agent-chat-message agent-chat-message--user">
-          <div class="agent-chat-message-header">
-            <span class="agent-chat-message-role">You</span>
-          </div>
-          <div class="agent-chat-message-body">{msg.content}</div>
-        </div>
-      {:else if msg.role === "agent"}
-        <div class="agent-chat-message agent-chat-message--agent">
-          <div class="agent-chat-message-header">
-            <span class="agent-chat-message-role">Agent</span>
-          </div>
-          <div class="agent-chat-message-body">
-            {@html msg.html}
-          </div>
-        </div>
-      {:else if msg.role === "error"}
-        <div class="agent-chat-message agent-chat-message--error">
-          <div class="agent-chat-message-body">{msg.content}</div>
-        </div>
+    <div
+      class="agent-chat-messages"
+      bind:this={messagesEl}
+      role="log"
+      tabindex="0"
+      on:click={handleLinkClick}
+      on:keydown={() => {}}
+    >
+      {#if messages.length === 0}
+        <div class="agent-chat-placeholder">{PLACEHOLDER}</div>
       {/if}
-    {/each}
 
-    {#if loading}
-      <div class="agent-chat-loading">Agent is thinking...</div>
-    {/if}
+      {#each messages as msg (msg === messages[messages.length - 1] ? null : Math.random())}
+        {#if msg.role === "user"}
+          <div class="agent-chat-message agent-chat-message--user">
+            <div class="agent-chat-message-body">{msg.content}</div>
+          </div>
+        {:else if msg.role === "agent"}
+          <div class="agent-chat-message agent-chat-message--agent">
+            <div class="agent-chat-message-header">
+              <span class="agent-chat-message-role">Agent</span>
+            </div>
+            <div class="agent-chat-message-body">{@html msg.html}</div>
+          </div>
+        {:else if msg.role === "error"}
+          <div class="agent-chat-message agent-chat-message--error">
+            <div class="agent-chat-message-body">{msg.content}</div>
+          </div>
+        {/if}
+      {/each}
+
+      {#if loading}
+        {#if loadingHtml}
+          {@html loadingHtml}
+        {:else}
+          <div class="agent-chat-loading">Agent is thinking...</div>
+        {/if}
+      {/if}
+    </div>
   </div>
 
   <div class="agent-chat-input-area">
@@ -143,14 +307,147 @@
   }
 
   :global(.agent-chat-header) {
-    padding: 12px 16px;
+    padding: 8px 12px;
     border-bottom: 1px solid var(--background-modifier-border);
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  :global(.agent-chat-header-left) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
   }
 
   :global(.agent-chat-header h3) {
     margin: 0;
-    font-size: 1.1em;
+    font-size: 0.95em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  :global(.agent-chat-sessions-btn) {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  :global(.agent-chat-sessions-btn:hover) {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+  }
+
+  :global(.agent-chat-new-btn) {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  :global(.agent-chat-new-btn:hover) {
+    color: var(--text-accent);
+    background: var(--background-modifier-hover);
+  }
+
+  :global(.agent-chat-body) {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  :global(.agent-sessions-panel) {
+    width: 220px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--background-modifier-border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  :global(.agent-sessions-panel-header) {
+    padding: 8px 12px;
+    font-size: 0.8em;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--background-modifier-border);
+  }
+
+  :global(.agent-sessions-list) {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px;
+  }
+
+  :global(.agent-session-item) {
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    position: relative;
+  }
+
+  :global(.agent-session-item:hover) {
+    background: var(--background-modifier-hover);
+  }
+
+  :global(.agent-session-item.active) {
+    background: var(--background-modifier-hover);
+  }
+
+  :global(.agent-session-item-title) {
+    font-size: 0.85em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-right: 20px;
+  }
+
+  :global(.agent-session-item-meta) {
+    font-size: 0.72em;
+    color: var(--text-muted);
+    display: flex;
+    gap: 8px;
+    margin-top: 2px;
+  }
+
+  :global(.agent-session-delete) {
+    position: absolute;
+    top: 8px;
+    right: 6px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 3px;
+    display: none;
+  }
+
+  :global(.agent-session-item:hover .agent-session-delete) {
+    display: flex;
+  }
+
+  :global(.agent-session-delete:hover) {
+    color: var(--text-error);
+    background: var(--background-modifier-error);
   }
 
   :global(.agent-chat-messages) {
@@ -260,53 +557,17 @@
     font-weight: 500;
   }
 
-  :global(.agent-entity--material) {
-    background: rgba(78, 121, 167, 0.15);
-    color: var(--text-accent);
-  }
+  :global(.agent-entity--material) { background: rgba(78, 121, 167, 0.15); color: var(--text-accent); }
+  :global(.agent-entity--experiment) { background: rgba(89, 161, 79, 0.15); color: #59a14f; }
+  :global(.agent-entity--property) { background: rgba(237, 201, 72, 0.15); color: #c9a90e; }
+  :global(.agent-entity--regime) { background: rgba(225, 87, 89, 0.15); color: #e15759; }
+  :global(.agent-entity--equipment) { background: rgba(178, 126, 197, 0.15); color: #b07cc5; }
+  :global(.agent-entity--team) { background: rgba(242, 142, 44, 0.15); color: #f28e2c; }
+  :global(.agent-entity--topic) { background: rgba(118, 183, 178, 0.15); color: #76b7b2; }
 
-  :global(.agent-entity--experiment) {
-    background: rgba(89, 161, 79, 0.15);
-    color: #59a14f;
-  }
-
-  :global(.agent-entity--property) {
-    background: rgba(237, 201, 72, 0.15);
-    color: #c9a90e;
-  }
-
-  :global(.agent-entity--regime) {
-    background: rgba(225, 87, 89, 0.15);
-    color: #e15759;
-  }
-
-  :global(.agent-entity--equipment) {
-    background: rgba(178, 126, 197, 0.15);
-    color: #b07cc5;
-  }
-
-  :global(.agent-entity--team) {
-    background: rgba(242, 142, 44, 0.15);
-    color: #f28e2c;
-  }
-
-  :global(.agent-entity--topic) {
-    background: rgba(118, 183, 178, 0.15);
-    color: #76b7b2;
-  }
-
-  :global(.agent-relation-list) {
-    font-size: 0.85em;
-  }
-
-  :global(.agent-relation) {
-    padding: 2px 0;
-  }
-
-  :global(.agent-relation-type) {
-    color: var(--text-accent);
-    font-style: italic;
-  }
+  :global(.agent-relation-list) { font-size: 0.85em; }
+  :global(.agent-relation) { padding: 2px 0; }
+  :global(.agent-relation-type) { color: var(--text-accent); font-style: italic; }
 
   :global(.agent-source-list) {
     display: flex;
@@ -321,26 +582,10 @@
     border-radius: 0 4px 4px 0;
   }
 
-  :global(.agent-source-link) {
-    margin-bottom: 2px;
-  }
-
-  :global(.agent-link) {
-    color: var(--link-color);
-    cursor: pointer;
-    text-decoration: underline;
-    font-weight: 500;
-  }
-
-  :global(.agent-link:hover) {
-    color: var(--link-color-hover);
-  }
-
-  :global(.agent-source-excerpt) {
-    font-size: 0.82em;
-    color: var(--text-muted);
-    font-style: italic;
-  }
+  :global(.agent-source-link) { margin-bottom: 2px; }
+  :global(.agent-link) { color: var(--link-color); cursor: pointer; text-decoration: underline; font-weight: 500; }
+  :global(.agent-link:hover) { color: var(--link-color-hover); }
+  :global(.agent-source-excerpt) { font-size: 0.82em; color: var(--text-muted); font-style: italic; }
 
   :global(.agent-gap-list) {
     display: flex;
@@ -348,21 +593,9 @@
     gap: 4px;
   }
 
-  :global(.agent-gap) {
-    display: flex;
-    gap: 6px;
-    padding: 4px 0;
-    font-size: 0.85em;
-  }
-
-  :global(.agent-gap-icon) {
-    flex-shrink: 0;
-    color: var(--text-warning);
-  }
-
-  :global(.agent-gap-text) {
-    color: var(--text-muted);
-  }
+  :global(.agent-gap) { display: flex; gap: 6px; padding: 4px 0; font-size: 0.85em; }
+  :global(.agent-gap-icon) { flex-shrink: 0; color: var(--text-warning); }
+  :global(.agent-gap-text) { color: var(--text-muted); }
 
   :global(.agent-chat-input-area) {
     padding: 8px 12px;
@@ -384,10 +617,7 @@
     font-family: inherit;
   }
 
-  :global(.agent-chat-input:focus) {
-    outline: none;
-    border-color: var(--interactive-accent);
-  }
+  :global(.agent-chat-input:focus) { outline: none; border-color: var(--interactive-accent); }
 
   :global(.agent-chat-send-button) {
     align-self: flex-end;
@@ -401,7 +631,24 @@
     font-size: 0.9em;
   }
 
-  :global(.agent-chat-send-button:hover) {
-    opacity: 0.85;
+  :global(.agent-chat-send-button:hover) { opacity: 0.85; }
+
+  :global(.agent-loading-dot) {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    margin-right: 3px;
+    animation: agent-dot-pulse 1.4s ease-in-out infinite both;
+  }
+
+  :global(.agent-loading-dot:nth-child(1)) { animation-delay: 0s; }
+  :global(.agent-loading-dot:nth-child(2)) { animation-delay: 0.2s; }
+  :global(.agent-loading-dot:nth-child(3)) { animation-delay: 0.4s; }
+
+  @keyframes agent-dot-pulse {
+    0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+    40% { opacity: 1; transform: scale(1.1); }
   }
 </style>
