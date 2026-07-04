@@ -7,3 +7,4 @@ export { default as PromptDialog } from "./components/layout/PromptDialog.svelte
 export { default as Banner } from "./components/layout/Banner.svelte";
 export { default as SyncSetupModal } from "./views/SyncSetupModal.svelte";
 export { default as AdminDashboard } from "./views/admin/AdminDashboard.svelte";
+export { default as ChatView } from "./views/agent/ChatView.svelte";

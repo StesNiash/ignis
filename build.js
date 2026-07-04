@@ -12,6 +12,16 @@ const headlessSyncDir = path.join(
   "obsidian",
 );
 
+const agentDir = path.join(
+  __dirname,
+  "apps",
+  "ignis-server",
+  "server",
+  "plugins",
+  "agent",
+  "obsidian",
+);
+
 // Compute version info once and share across per-package builds.
 const { version: semver } = require("./package.json");
 const build = process.env.IGNIS_BUILD || Date.now().toString(36).slice(-7);
@@ -56,6 +66,25 @@ Promise.all([
       fs.copyFileSync(
         path.join(headlessSyncDir, "styles.css"),
         path.join(headlessSyncDir, "dist", "ignis-headless-sync.css"),
+      );
+    }),
+
+  // Build agent bundled plugin
+  esbuild
+    .build({
+      entryPoints: [path.join(agentDir, "src", "main.js")],
+      bundle: true,
+      outfile: path.join(agentDir, "dist", "ignis-agent.js"),
+      format: "cjs",
+      platform: "browser",
+      target: ["chrome90"],
+      external: ["obsidian"],
+      logLevel: "info",
+    })
+    .then(() => {
+      fs.copyFileSync(
+        path.join(agentDir, "styles.css"),
+        path.join(agentDir, "dist", "ignis-agent.css"),
       );
     }),
 ]).catch(() => process.exit(1));
